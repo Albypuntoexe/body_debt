@@ -1,11 +1,11 @@
-import 'package:flutter/foundation.dart';
+import 'dart:convert';
 
 // --- User Profile (Setup) ---
 class UserProfile {
   final int age;
   final double weightKg;
   final double heightCm;
-  final String gender; // 'M' or 'F'
+  final String gender;
 
   const UserProfile({
     required this.age,
@@ -14,17 +14,39 @@ class UserProfile {
     this.gender = 'M',
   });
 
-  // Calculate BMI automatically within the model logic
   double get bmi => weightKg / ((heightCm / 100) * (heightCm / 100));
 
-  static const empty = UserProfile(age: 25, weightKg: 70, heightCm: 175);
+  static const empty = UserProfile(age: 0, weightKg: 0, heightCm: 0);
+  bool get isSet => age > 0; // Check if user has completed setup
+
+  // Serialization for Disk Storage
+  Map<String, dynamic> toMap() {
+    return {
+      'age': age,
+      'weightKg': weightKg,
+      'heightCm': heightCm,
+      'gender': gender,
+    };
+  }
+
+  factory UserProfile.fromMap(Map<String, dynamic> map) {
+    return UserProfile(
+      age: map['age'] ?? 25,
+      weightKg: map['weightKg']?.toDouble() ?? 70.0,
+      heightCm: map['heightCm']?.toDouble() ?? 175.0,
+      gender: map['gender'] ?? 'M',
+    );
+  }
+
+  String toJson() => json.encode(toMap());
+  factory UserProfile.fromJson(String source) => UserProfile.fromMap(json.decode(source));
 }
 
 // --- Daily Inputs (Sleep & Water) ---
 class DailyInput {
   final double sleepHours;
   final double waterLiters;
-  final double activityLevel; // 1.0 to 2.0 multiplier
+  final double activityLevel;
 
   const DailyInput({
     this.sleepHours = 0,
@@ -39,15 +61,32 @@ class DailyInput {
       activityLevel: activityLevel ?? this.activityLevel,
     );
   }
+
+  // Serialization
+  Map<String, dynamic> toMap() {
+    return {
+      'sleepHours': sleepHours,
+      'waterLiters': waterLiters,
+      'activityLevel': activityLevel,
+    };
+  }
+
+  factory DailyInput.fromMap(Map<String, dynamic> map) {
+    return DailyInput(
+      sleepHours: map['sleepHours']?.toDouble() ?? 0.0,
+      waterLiters: map['waterLiters']?.toDouble() ?? 0.0,
+      activityLevel: map['activityLevel']?.toDouble() ?? 1.2,
+    );
+  }
 }
 
-// --- The Simulation Result (Output) ---
+// --- Simulation Result ---
 class SimulationResult {
-  final int energyPercentage;    // 0-100%
-  final double sleepDebtHours;   // Cumulative debt
-  final double hydrationStatus;  // % of requirement
-  final String predictionMessage; // "If you continue..."
-  final bool isPrediction;       // true if this is a "What If" scenario
+  final int energyPercentage;
+  final double sleepDebtHours;
+  final double hydrationStatus;
+  final String predictionMessage;
+  final bool isPrediction;
 
   const SimulationResult({
     required this.energyPercentage,

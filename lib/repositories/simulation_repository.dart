@@ -1,69 +1,102 @@
+import 'dart:convert';
 import '../models/models.dart';
 import '../services/preferences_service.dart';
 
 class SimulationRepository {
   final PreferencesService _service;
 
-  // Keys
-  static const _keyWeight = 'user_weight';
-  static const _keySleep = 'last_sleep';
-  static const _keyWater = 'last_water';
+  // Storage Keys
+  static const _keyProfile = 'user_profile_data';
+  static const _keyHistory = 'history_log_map';
 
   SimulationRepository(this._service);
 
-  /// 1. Load User Data
+  // --- Profile Management ---
   UserProfile loadProfile() {
-    // In a real app, check if keys exist. Returning default for demo.
-    return UserProfile(
-      weightKg: _service.getDouble(_keyWeight) ?? 70,
-      heightCm: 175,
-      age: 25,
-    );
+    final jsonStr = _service.getString(_keyProfile);
+    if (jsonStr == null) return UserProfile.empty;
+    return UserProfile.fromJson(jsonStr);
   }
 
-  /// 2. The CORE ENGINE: Calculates BodyDebt based on inputs
-  /// This implements the "Causal" and "Predictive" logic.
+  Future<void> saveProfile(UserProfile profile) async {
+    await _service.setString(_keyProfile, profile.toJson());
+  }
+
+  // --- History & Calendar Management ---
+
+  /// Loads the specific log for a date. If none exists, returns default.
+  DailyInput loadLogForDate(DateTime date) {
+    final history = _loadHistoryMap();
+    final key = _dateToKey(date);
+
+    if (history.containsKey(key)) {
+      return DailyInput.fromMap(history[key]);
+    }
+    return const DailyInput(); // Return empty/default if no data for that day
+  }
+
+  /// Saves the log for a specific date to disk
+  Future<void> saveLogForDate(DateTime date, DailyInput input) async {
+    final history = _loadHistoryMap();
+    final key = _dateToKey(date);
+
+    history[key] = input.toMap();
+
+    // Convert entire map back to JSON and save
+    await _service.setString(_keyHistory, json.encode(history));
+  }
+
+  /// Helper: Load full history from disk
+  Map<String, dynamic> _loadHistoryMap() {
+    final jsonStr = _service.getString(_keyHistory);
+    if (jsonStr == null) return {};
+    return json.decode(jsonStr) as Map<String, dynamic>;
+  }
+
+  /// Helper: Format Date key (YYYY-MM-DD) to ignore time
+  String _dateToKey(DateTime date) {
+    return "${date.year}-${date.month.toString().padLeft(2,'0')}-${date.day.toString().padLeft(2,'0')}";
+  }
+
+  // --- Simulation Logic (The Math) ---
   SimulationResult runSimulation(UserProfile profile, DailyInput input, {bool isForecast = false}) {
+    if (!profile.isSet) return SimulationResult.initial;
 
-    // --- Logic 1: Sleep Debt ---
-    // Rule: Need 8 hours. Every missing hour is 12.5% energy loss.
-    // Recovery: You only recover 50% of surplus sleep.
     double requiredSleep = 8.0;
-    double sleepDifference = input.sleepHours - requiredSleep;
+    // Older people need slightly less sleep (simple logic for demo)
+    if (profile.age > 60) requiredSleep = 7.0;
 
-    // Calculate simple accumulated debt (simplified for this specific day/scenario)
+    double sleepDifference = input.sleepHours - requiredSleep;
     double debt = sleepDifference < 0 ? -sleepDifference : 0;
 
-    // --- Logic 2: Hydration ---
-    // Rule: Base 2.5L + Activity.
-    double requiredWater = 2.5 * input.activityLevel;
+    // Hydration needs based on Weight and Activity
+    // Formula: 35ml per kg + 500ml per activity level point over 1.0
+    double baseWater = (profile.weightKg * 0.035);
+    double activityWater = (input.activityLevel - 1.0) * 0.5;
+    double requiredWater = baseWater + activityWater;
+
     double hydrationPct = (input.waterLiters / requiredWater).clamp(0.0, 1.0);
 
-    // --- Logic 3: Energy Calculation ---
-    // Start at 100%. Subtract penalties.
+    // Energy Calculation
     double energy = 100.0;
 
-    // Sleep Penalty
+    // Penalties
     if (input.sleepHours < requiredSleep) {
-      energy -= (requiredSleep - input.sleepHours) * 10; // -10% per hour lost
+      energy -= (requiredSleep - input.sleepHours) * 12;
+    }
+    if (hydrationPct < 0.9) {
+      energy -= (1.0 - hydrationPct) * 30;
     }
 
-    // Dehydration Penalty (Exponential decay)
-    if (hydrationPct < 0.8) {
-      energy -= (1.0 - hydrationPct) * 40; // Severe penalty for dehydration
-    }
+    // BMI Impact (Slight penalty if obese)
+    if (profile.bmi > 30) energy -= 5;
 
-    // --- Logic 4: Prediction String ---
-    String message = "Stable.";
-    if (energy < 50) {
-      message = isForecast
-          ? "CRITICAL: If you do this, tomorrow you will crash."
-          : "System Failure imminent. Rest required.";
-    } else if (input.waterLiters < 1.0) {
-      message = "Warning: Dehydration will reduce cognitive function by -15%.";
-    } else if (sleepDifference > 0) {
-      message = "Recovering: Energy +${(sleepDifference * 5).toInt()}% restored.";
-    }
+    // Messages
+    String message = "System Optimal.";
+    if (energy < 40) message = "SYSTEM FAILURE IMMINENT.";
+    else if (sleepDifference < -2) message = "Severe sleep deprivation detected.";
+    else if (hydrationPct < 0.5) message = "Hydration critical. Cognitive decline expected.";
+    else if (isForecast) message = "Projected outcome based on current settings.";
 
     return SimulationResult(
       energyPercentage: energy.clamp(0, 100).toInt(),
@@ -74,9 +107,8 @@ class SimulationRepository {
     );
   }
 
-  /// Save today's actual data
-  Future<void> saveLog(DailyInput input) async {
-    await _service.setDouble(_keySleep, input.sleepHours);
-    await _service.setDouble(_keyWater, input.waterLiters);
+  // --- Reset ---
+  Future<void> clearAllData() async {
+    await _service.clear();
   }
 }
