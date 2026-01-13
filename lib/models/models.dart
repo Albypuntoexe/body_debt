@@ -87,6 +87,7 @@ class SimulationResult {
   final double hydrationStatus;
   final String predictionMessage;
   final bool isPrediction;
+  final bool isDayStarted; // NUOVO: true se abbiamo dati validi per oggi
 
   const SimulationResult({
     required this.energyPercentage,
@@ -94,12 +95,14 @@ class SimulationResult {
     required this.hydrationStatus,
     required this.predictionMessage,
     this.isPrediction = false,
+    this.isDayStarted = false,
   });
 
   static const initial = SimulationResult(
     energyPercentage: 100,
     sleepDebtHours: 0,
     hydrationStatus: 100,
-    predictionMessage: "System balanced.",
+    predictionMessage: "Ready to start.",
+    isDayStarted: false,
   );
 }
