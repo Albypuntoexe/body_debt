@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../repositories/simulation_repository.dart';
+import '../services/notification_service.dart';
 
 class SimulationViewModel extends ChangeNotifier {
   final SimulationRepository _repository;
+  final NotificationService _notifications;
 
   // State
   UserProfile _userProfile = UserProfile.empty;
@@ -11,14 +14,37 @@ class SimulationViewModel extends ChangeNotifier {
   SimulationResult _result = SimulationResult.initial;
 
   DateTime _selectedDate = DateTime.now();
-  bool _isWhatIfMode = false; // "Simulation Mode"
+  bool _isWhatIfMode = false;
   bool _isLoading = true;
-
-  // Morning Check Logic
   bool _morningCheckDone = false;
 
-  SimulationViewModel(this._repository) {
+  Timer? _refreshTimer;
+
+  // Costruttore con Dependency Injection
+  SimulationViewModel(this._repository, this._notifications) {
     _init();
+    _startRealTimeUpdates();
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel(); // Importante: ferma il timer quando chiudi l'app
+    super.dispose();
+  }
+
+  void _startRealTimeUpdates() {
+    // Aggiorna la simulazione ogni 60 secondi
+    _refreshTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
+      // Ricalcola SOLO se stiamo guardando la giornata odierna e se è iniziata
+      if (isSelectedDateToday && _result.isDayStarted && !_isWhatIfMode) {
+        _calculate(save: false);
+
+        // Se serve acqua e le notifiche sono attive, invia alert
+        if (_result.needsWaterNow && _notifications.areNotificationsEnabled) {
+          _notifications.showHydrationReminder();
+        }
+      }
+    });
   }
 
   // Getters
@@ -28,8 +54,8 @@ class SimulationViewModel extends ChangeNotifier {
   DateTime get selectedDate => _selectedDate;
   bool get isLoading => _isLoading;
   bool get isSetupRequired => !_userProfile.isSet;
+  bool get areNotificationsEnabled => _notifications.areNotificationsEnabled;
 
-  /// Helper: Check if the currently selected date in the dashboard is TODAY
   bool get isSelectedDateToday {
     final now = DateTime.now();
     return _selectedDate.year == now.year &&
@@ -37,70 +63,39 @@ class SimulationViewModel extends ChangeNotifier {
         _selectedDate.day == now.day;
   }
 
-  /// Strict Logic for Morning Prompt:
-  /// 1. Only if looking at TODAY
-  /// 2. Only if prompt not already shown/skipped (_morningCheckDone)
-  /// 3. Only if day hasn't started yet (no data logged)
   bool get shouldShowMorningPrompt {
     if (!isSelectedDateToday) return false;
     return !_morningCheckDone && !_result.isDayStarted;
   }
 
+  // --- Initialization ---
   Future<void> _init() async {
     _userProfile = _repository.loadProfile();
-    // Normalize date to remove time part for accurate comparison
+
+    // Normalizza la data a Oggi
     final now = DateTime.now();
     _selectedDate = DateTime(now.year, now.month, now.day);
 
     _currentInput = _repository.loadLogForDate(_selectedDate);
 
-    // Check if we already have data for today to skip prompt
-    if (_currentInput.sleepHours > 0) {
-      _morningCheckDone = true;
-    }
+    // Se abbiamo già dormito, il check mattutino è fatto
+    if (_currentInput.sleepHours > 0) _morningCheckDone = true;
 
     _calculate(save: false);
     _isLoading = false;
     notifyListeners();
   }
 
-  // --- Morning Prompt Logic ---
-  void markMorningPromptSeen() {
-    _morningCheckDone = true;
+  // --- Actions ---
+
+  Future<void> toggleNotifications(bool value) async {
+    await _notifications.toggleNotifications(value);
     notifyListeners();
   }
 
-  void answerMorningPrompt(double sleepHours) {
-    updateInputs(sleep: sleepHours);
-    commitData(); // Auto-save
-    _morningCheckDone = true;
-  }
-
-  // --- Incremental Actions ---
-
-  void addWaterGlass() {
-    // 1 Glass = 200ml = 0.2 Liters
-    double newVal = _currentInput.waterLiters + 0.2;
-    updateInputs(water: newVal);
-    commitData();
-  }
-
-  void addNap(double hours) {
-    double newVal = _currentInput.sleepHours + hours;
-    updateInputs(sleep: newVal);
-    commitData();
-  }
-
-  // --- Standard Methods ---
-
   Future<void> selectDate(DateTime date) async {
-    // Normalize date (strip time)
     _selectedDate = DateTime(date.year, date.month, date.day);
     _isWhatIfMode = false;
-
-    // If we switch to a past date, we don't want the prompt logic to interfere.
-    // If we switch back to TODAY, the prompt might trigger if data is empty.
-
     _currentInput = _repository.loadLogForDate(_selectedDate);
     _calculate(save: false);
     notifyListeners();
@@ -112,20 +107,34 @@ class SimulationViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> resetApp() async {
-    await _repository.clearAllData();
-    _userProfile = UserProfile.empty;
-    _currentInput = const DailyInput();
-    _result = SimulationResult.initial;
-    _morningCheckDone = false;
+  // --- Logic & Inputs ---
+
+  void markMorningPromptSeen() {
+    _morningCheckDone = true;
     notifyListeners();
+  }
+
+  void answerMorningPrompt(double sleep) {
+    updateInputs(sleep: sleep);
+    commitData();
+    _morningCheckDone = true;
+  }
+
+  void addWaterGlass() {
+    updateInputs(water: _currentInput.waterLiters + 0.2);
+    commitData();
+  }
+
+  void addNap(double hours) {
+    updateInputs(sleep: _currentInput.sleepHours + hours);
+    commitData();
   }
 
   void updateInputs({double? sleep, double? water, double? activity}) {
     _currentInput = _currentInput.copyWith(
-      sleepHours: sleep,
-      waterLiters: water,
-      activityLevel: activity,
+        sleepHours: sleep,
+        waterLiters: water,
+        activityLevel: activity
     );
     _isWhatIfMode = true;
     _calculate(save: false);
@@ -148,6 +157,17 @@ class SimulationViewModel extends ChangeNotifier {
     _isWhatIfMode = false;
     await _repository.saveLogForDate(_selectedDate, _currentInput);
     _calculate(save: true);
+    notifyListeners();
+  }
+
+  Future<void> resetApp() async {
+    await _repository.clearAllData();
+    _isWhatIfMode = false;
+    _morningCheckDone = false;
+    _currentInput = const DailyInput();
+    _result = SimulationResult.initial;
+    _userProfile = UserProfile.empty;
+    await _init(); // Ricarica tutto da zero
     notifyListeners();
   }
 }

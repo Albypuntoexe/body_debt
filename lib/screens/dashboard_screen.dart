@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../view_models/simulation_view_model.dart';
 import '../models/models.dart';
 import 'setup_screen.dart';
+import 'settings_screen.dart'; // Import necessario
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -25,7 +26,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final vm = context.read<SimulationViewModel>();
     final hour = DateTime.now().hour;
 
-    // Mostra il prompt SOLO se è OGGI, sono passate le 5 del mattino, e non è stato ancora mostrato
     if (vm.isSelectedDateToday && hour >= 5 && vm.shouldShowMorningPrompt) {
       showDialog(
         context: context,
@@ -49,7 +49,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               final date = vm.selectedDate;
               final now = DateTime.now();
               final isToday = date.year == now.year && date.month == now.month && date.day == now.day;
-              return Text(isToday ? "TODAY'S BALANCE" : "HISTORY: ${date.day}/${date.month}");
+              return Text(isToday ? "BODY DEBT // LIVE" : "HISTORY: ${date.day}/${date.month}");
             },
           ),
           actions: [
@@ -60,9 +60,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ),
         drawer: _buildDrawer(context),
-        // CORREZIONE QUI:
-        // La struttura principale è SEMPRE la colonna con le Tab in basso.
-        // Cambia solo il contenuto della metà superiore.
         body: Consumer<SimulationViewModel>(
           builder: (context, vm, _) {
             final res = vm.result;
@@ -70,25 +67,51 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
             return Column(
               children: [
-                // --- TOP SECTION (Grafici O Empty State) ---
+                // TOP SECTION
                 Expanded(
                   flex: 4,
                   child: hasNoData
-                      ? _buildEmptyState(context, vm) // Mostra messaggio se vuoto
-                      : SingleChildScrollView(        // Mostra grafici se ci sono dati
+                      ? _buildEmptyState(context, vm)
+                      : SingleChildScrollView(
                     padding: const EdgeInsets.all(16),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         _buildEnergyCard(context, res),
                         const SizedBox(height: 16),
+
+                        // --- NUOVO: ALERT IDRATAZIONE ---
+                        if (res.needsWaterNow && vm.isSelectedDateToday)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 16),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.blueAccent.withOpacity(0.2),
+                              border: Border.all(color: Colors.blueAccent),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: const [
+                                Icon(Icons.water_drop, color: Colors.blueAccent),
+                                SizedBox(width: 12),
+                                Expanded(
+                                    child: Text(
+                                        "Drain Alert: Hydration needed immediately to stop energy loss.",
+                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)
+                                    )
+                                ),
+                              ],
+                            ),
+                          ),
+                        // --------------------------------
+
                         _buildPredictionBox(context, res),
                       ],
                     ),
                   ),
                 ),
 
-                // --- BOTTOM SECTION (TABS - SEMPRE VISIBILI) ---
+                // BOTTOM TABS
                 const Divider(height: 1),
                 Container(
                   color: Theme.of(context).cardColor,
@@ -117,9 +140,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // --- WIDGETS ESTRAIBILI ---
+  // --- WIDGETS ---
 
-  // Nuovo Widget per gestire lo stato vuoto nella parte superiore
   Widget _buildEmptyState(BuildContext context, SimulationViewModel vm) {
     return Center(
       child: Padding(
@@ -147,7 +169,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               style: const TextStyle(color: Colors.grey),
             ),
             const SizedBox(height: 24),
-            // Mostra il pulsante rapido SOLO se è oggi, altrimenti usa le tab sotto
             if (vm.isSelectedDateToday)
               ElevatedButton(
                 onPressed: () => _checkMorningPrompt(),
@@ -179,8 +200,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             value: vm.input.sleepHours,
             min: 0,
             max: 14,
-            divisions: 28, // 0.5 steps
-            label: vm.input.sleepHours.toString(),
+            divisions: 28,
             onChanged: (v) => vm.updateInputs(sleep: v),
           ),
           const SizedBox(height: 10),
@@ -190,7 +210,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onPressed: () => vm.addNap(0.33),
           ),
           const Spacer(),
-          // Mostra il tasto salva se siamo in modalità predizione O se stiamo modificando la storia
           if (!vm.result.isPrediction && vm.isSelectedDateToday)
             const Text("Data synced.", style: TextStyle(color: Colors.green))
           else
@@ -252,8 +271,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // --- WIDGETS SECONDARI ---
-
   Widget _buildMorningDialog(BuildContext context, SimulationViewModel vm) {
     double tempSleep = 7.0;
     return AlertDialog(
@@ -280,7 +297,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       actions: [
         TextButton(
           onPressed: () {
-            vm.markMorningPromptSeen(); // Skip
+            vm.markMorningPromptSeen();
             Navigator.pop(context);
           },
           child: const Text("Skip"),
@@ -306,7 +323,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
-            const Text("PREDICTED ENERGY"),
+            const Text("CURRENT ENERGY"), // Cambiato da Predicted a Current
             const SizedBox(height: 8),
             Text(
               "${res.energyPercentage}%",
@@ -315,7 +332,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ),
             if (res.isPrediction)
-              const Text("PREVIEW MODE - TAP SAVE TO CONFIRM", style: TextStyle(fontSize: 10, color: Colors.amber)),
+              const Text("PREVIEW MODE", style: TextStyle(fontSize: 10, color: Colors.amber)),
           ],
         ),
       ),
@@ -333,7 +350,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("INSIGHT", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+          const Text("SYSTEM STATUS", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
           const SizedBox(height: 4),
           Text(res.predictionMessage, style: const TextStyle(fontStyle: FontStyle.italic)),
         ],
@@ -345,13 +362,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Drawer(
       child: ListView(
         children: [
-          const DrawerHeader(child: Center(child: Text("SETTINGS"))),
+          const DrawerHeader(child: Center(child: Text("BODY DEBT"))),
           ListTile(
-            leading: const Icon(Icons.delete_forever, color: Colors.red),
-            title: const Text("Reset All Data"),
+            leading: const Icon(Icons.settings),
+            title: const Text("Settings & Reset"),
             onTap: () {
               Navigator.pop(context);
-              context.read<SimulationViewModel>().resetApp();
+              // Naviga alla schermata Impostazioni
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
             },
           )
         ],

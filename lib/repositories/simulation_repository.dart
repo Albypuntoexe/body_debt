@@ -57,74 +57,84 @@ class SimulationRepository {
     return "${date.year}-${date.month.toString().padLeft(2,'0')}-${date.day.toString().padLeft(2,'0')}";
   }
 
-  // --- REVISED SIMULATION LOGIC ---
   SimulationResult runSimulation(UserProfile profile, DailyInput input, {bool isForecast = false}) {
     if (!profile.isSet) return SimulationResult.initial;
 
-    // Se l'utente non ha ancora inserito nulla (0 sonno, 0 acqua),
-    // non mostriamo "Failure", ma uno stato di attesa.
+    // Se non ci sono dati, giorno non iniziato
     if (input.sleepHours == 0 && input.waterLiters == 0 && !isForecast) {
       return const SimulationResult(
         energyPercentage: 0,
         sleepDebtHours: 0,
         hydrationStatus: 0,
-        predictionMessage: "Waiting for today's data...",
+        predictionMessage: "Waiting for data...",
         isPrediction: false,
-        isDayStarted: false, // NUOVO FLAG
+        isDayStarted: false,
       );
     }
 
-    double requiredSleep = 8.0;
-    if (profile.age > 60) requiredSleep = 7.0;
+    final now = DateTime.now();
+    // Assumiamo sveglia alle 8:00 se non specificato (per semplicità)
+    final wakeUpTime = DateTime(now.year, now.month, now.day, 8, 0);
 
-    double sleepDifference = input.sleepHours - requiredSleep;
-    double debt = sleepDifference < 0 ? -sleepDifference : 0;
+    // Calcolo ore passate dalla sveglia (minimo 0)
+    double hoursAwake = now.difference(wakeUpTime).inMinutes / 60.0;
+    if (hoursAwake < 0) hoursAwake = 0; // Prima delle 8:00
 
-    // Water logic
-    double baseWater = (profile.weightKg * 0.035);
-    double activityWater = (input.activityLevel - 1.0) * 0.5;
-    double requiredWater = baseWater + activityWater;
-    double hydrationPct = (input.waterLiters / requiredWater).clamp(0.0, 1.0);
+    // --- 1. IDRATAZIONE TEMPORALE ---
+    // Regola: 1 bicchiere (200ml) ogni 90 minuti (1.5 ore) è l'ideale.
+    double idealWaterIntake = (hoursAwake / 1.5) * 0.2;
+    if (idealWaterIntake < 0.2) idealWaterIntake = 0.2; // Almeno un bicchiere per iniziare
 
-    // Energy Calc
-    double energy = 100.0;
+    // Deficit idrico attuale
+    double waterDeficit = idealWaterIntake - input.waterLiters;
+    bool needsWaterNow = waterDeficit > 0.15; // Se mancano quasi un bicchiere (150ml)
 
-    // Penalties (Calibrated)
+    // --- 2. DRAIN ENERGETICO ---
+    double baseEnergy = 100.0;
+
+    // Penalità Sonno (Start Level)
+    double requiredSleep = (profile.age > 60) ? 7.0 : 8.0;
     if (input.sleepHours < requiredSleep) {
-      // Penalty less harsh immediately, accumulating
-      energy -= (requiredSleep - input.sleepHours) * 10;
+      baseEnergy -= (requiredSleep - input.sleepHours) * 10;
     }
-    if (hydrationPct < 0.9) {
-      energy -= (1.0 - hydrationPct) * 25;
+
+    // Decay Rate (Scarica oraria)
+    // Base: -4% energia all'ora.
+    // Se disidratato: il decadimento accelera a -8% all'ora!
+    double hourlyDecay = 4.0;
+    if (needsWaterNow) {
+      hourlyDecay = 8.0; // IL DOPPIO DELLA FATICA SE NON BEVI
     }
-    if (profile.bmi > 30) energy -= 5;
 
-    // --- NEW EMPATHETIC MESSAGES ---
-    String message = "All systems operational.";
+    double currentEnergy = baseEnergy - (hoursAwake * hourlyDecay);
 
-    if (energy < 40) {
-      message = "Your body is running on reserves. Prioritize rest tonight.";
-    } else if (sleepDifference < -2) {
-      message = "Sleep debt detected. A short nap could help restore focus.";
-    } else if (hydrationPct < 0.5) {
-      message = "Hydration is low. A glass of water now will prevent headaches later.";
-    } else if (hydrationPct < 0.8) {
-      message = "Good start, but keep sipping water to maintain peak energy.";
-    } else if (isForecast) {
-      message = "Projected impact of these choices.";
+    // Bonus parziali (Sonno extra recuperato o cibo) possono essere aggiunti qui
+    // Clamp finale
+    currentEnergy = currentEnergy.clamp(0.0, 100.0);
+
+    // --- MESSAGGI ---
+    String message = "Energy levels stable.";
+
+    if (needsWaterNow) {
+      message = "Hydration alert: You are lagging behind. Drink a glass now to stop the energy drain.";
+    } else if (currentEnergy < 30) {
+      message = "Battery Low. Mental focus is compromised.";
+    } else if (hoursAwake > 14) {
+      message = "End of day approaching. Wind down naturally.";
+    } else if (input.sleepHours < requiredSleep) {
+      message = "Running on caffeine and willpower due to sleep debt.";
     }
 
     return SimulationResult(
-      energyPercentage: energy.clamp(0, 100).toInt(),
-      sleepDebtHours: debt,
-      hydrationStatus: hydrationPct * 100,
+      energyPercentage: currentEnergy.toInt(),
+      sleepDebtHours: (requiredSleep - input.sleepHours).clamp(0, 24),
+      hydrationStatus: (input.waterLiters / (idealWaterIntake + 0.5)) * 100, // Status vs Ideal so far
       predictionMessage: message,
       isPrediction: isForecast,
       isDayStarted: true,
+      needsWaterNow: needsWaterNow, // NUOVO CAMPO (vedi sotto)
     );
   }
-
-  // --- Reset ---
   Future<void> clearAllData() async {
     await _service.clear();
   }

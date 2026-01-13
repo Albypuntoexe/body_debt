@@ -79,15 +79,14 @@ class DailyInput {
     );
   }
 }
-
-// --- Simulation Result ---
 class SimulationResult {
   final int energyPercentage;
   final double sleepDebtHours;
   final double hydrationStatus;
   final String predictionMessage;
   final bool isPrediction;
-  final bool isDayStarted; // NUOVO: true se abbiamo dati validi per oggi
+  final bool isDayStarted;
+  final bool needsWaterNow; // NUOVO: true se devo bere ORA
 
   const SimulationResult({
     required this.energyPercentage,
@@ -96,13 +95,15 @@ class SimulationResult {
     required this.predictionMessage,
     this.isPrediction = false,
     this.isDayStarted = false,
+    this.needsWaterNow = false,
   });
 
   static const initial = SimulationResult(
     energyPercentage: 100,
     sleepDebtHours: 0,
     hydrationStatus: 100,
-    predictionMessage: "Ready to start.",
+    predictionMessage: "Ready.",
     isDayStarted: false,
+    needsWaterNow: false,
   );
 }
