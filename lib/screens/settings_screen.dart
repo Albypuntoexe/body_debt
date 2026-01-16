@@ -17,7 +17,7 @@ class SettingsScreen extends StatelessWidget {
                 title: const Text("Hydration Reminders"),
                 subtitle: const Text("Receive alerts when you are behind on water"),
                 secondary: const Icon(Icons.notifications_active),
-                activeColor: Theme.of(context).colorScheme.primary,
+                activeThumbColor: Theme.of(context).colorScheme.primary,
                 value: vm.areNotificationsEnabled,
                 onChanged: (val) => vm.toggleNotifications(val),
               ),

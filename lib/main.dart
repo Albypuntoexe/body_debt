@@ -4,29 +4,31 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'services/preferences_service.dart';
 import 'services/notification_service.dart';
+import 'services/background_service.dart';
 import 'repositories/simulation_repository.dart';
 import 'view_models/simulation_view_model.dart';
 import 'screens/dashboard_screen.dart';
 import 'app/theme.dart';
 
 void main() async {
-  // Assicura che i binding nativi siano pronti prima di chiamare istanze asincrone
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1. Platform Layer
   final prefs = await SharedPreferences.getInstance();
-
-  // 2. Service Layer
   final prefsService = PreferencesService(prefs);
-  final notificationService = NotificationService(prefsService); // Nuovo servizio
 
-  // 3. Repository Layer
+  // 1. Setup Servizi
+  final notificationService = NotificationService(prefsService);
+  await notificationService.init(); // Chiede permessi UI
+
+  final backgroundService = BackgroundService();
+  await backgroundService.init(); // Inizializza WorkManager
+  await backgroundService.registerPeriodicTask(); // Schedula il task ogni 15 min
+
+  // 2. Repo
   final simRepo = SimulationRepository(prefsService);
 
-  // 4. App Launch
   runApp(
     ChangeNotifierProvider(
-      // Iniettiamo entrambi i servizi nel ViewModel
       create: (_) => SimulationViewModel(simRepo, notificationService),
       child: const BodyDebtApp(),
     ),
