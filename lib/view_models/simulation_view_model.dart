@@ -8,7 +8,6 @@ class SimulationViewModel extends ChangeNotifier {
   final SimulationRepository _repository;
   final NotificationService _notifications;
 
-  // State
   UserProfile _userProfile = UserProfile.empty;
   DailyInput _currentInput = const DailyInput();
   SimulationResult _result = SimulationResult.initial;
@@ -42,7 +41,6 @@ class SimulationViewModel extends ChangeNotifier {
     });
   }
 
-  // Getters
   SimulationResult get result => _result;
   DailyInput get input => _currentInput;
   UserProfile get userProfile => _userProfile;
@@ -63,7 +61,6 @@ class SimulationViewModel extends ChangeNotifier {
     return !_morningCheckDone && !_result.isDayStarted;
   }
 
-  // --- Initialization ---
   Future<void> _init() async {
     _userProfile = _repository.loadProfile();
     final now = DateTime.now();
@@ -74,8 +71,6 @@ class SimulationViewModel extends ChangeNotifier {
     _isLoading = false;
     notifyListeners();
   }
-
-  // --- Actions ---
 
   Future<void> toggleNotifications(bool value) async {
     await _notifications.toggleNotifications(value);
@@ -114,6 +109,42 @@ class SimulationViewModel extends ChangeNotifier {
     commitData();
   }
 
+  // --- NUOVI METODI ORARI ---
+
+  void setPreciseSleepTimes(TimeOfDay bedTime, TimeOfDay wakeTime) {
+    // Formatta come stringa "HH:mm" per semplicità di storage
+    String bedStr = "${bedTime.hour.toString().padLeft(2,'0')}:${bedTime.minute.toString().padLeft(2,'0')}";
+    String wakeStr = "${wakeTime.hour.toString().padLeft(2,'0')}:${wakeTime.minute.toString().padLeft(2,'0')}";
+
+    // Calcoliamo le ore totali per retro-compatibilità col sistema a slider
+    double bedDouble = bedTime.hour + bedTime.minute/60.0;
+    double wakeDouble = wakeTime.hour + wakeTime.minute/60.0;
+    double totalHours;
+    if (wakeDouble > bedDouble) {
+      totalHours = wakeDouble - bedDouble;
+    } else {
+      totalHours = (24 - bedDouble) + wakeDouble;
+    }
+
+    _currentInput = _currentInput.copyWith(
+      bedTimeStr: bedStr,
+      wakeTimeStr: wakeStr,
+      sleepHours: totalHours,
+      usePreciseTiming: true,
+    );
+    _isWhatIfMode = true;
+    _calculate(save: false);
+    notifyListeners();
+  }
+
+  void togglePreciseMode(bool enable) {
+    _currentInput = _currentInput.copyWith(usePreciseTiming: enable);
+    _calculate(save: false);
+    notifyListeners();
+  }
+
+  // -------------------------
+
   void updateInputs({double? sleep, double? water, double? activity}) {
     _currentInput = _currentInput.copyWith(
         sleepHours: sleep,
@@ -126,17 +157,16 @@ class SimulationViewModel extends ChangeNotifier {
   }
 
   void _calculate({required bool save}) {
-    // Passiamo _selectedDate al repository per il calcolo storico
     _result = _repository.runSimulation(
         _userProfile,
         _currentInput,
         _selectedDate,
         isForecast: _isWhatIfMode
     );
-
     if (save) {
       _repository.saveLogForDate(_selectedDate, _currentInput);
     }
+    notifyListeners();
   }
 
   Future<void> commitData() async {

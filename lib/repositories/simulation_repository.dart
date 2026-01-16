@@ -11,7 +11,6 @@ class SimulationRepository {
 
   SimulationRepository(this._service);
 
-  // --- Profile & History Loading (Standard) ---
   UserProfile loadProfile() {
     final jsonStr = _service.getString(_keyProfile);
     if (jsonStr == null) return UserProfile.empty;
@@ -53,7 +52,7 @@ class SimulationRepository {
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  // ALGORITMO V6.0: Scientific Hydration Pacing & Positive Reinforcement
+  // ENGINE V8.0: Dynamic Update Fix
   // ════════════════════════════════════════════════════════════════════════════
 
   SimulationResult runSimulation(UserProfile profile, DailyInput currentInput, DateTime targetDate, {bool isForecast = false}) {
@@ -62,14 +61,10 @@ class SimulationRepository {
     final history = _loadHistoryMap();
     final now = DateTime.now();
     bool isToday = targetDate.year == now.year && targetDate.month == now.month && targetDate.day == now.day;
-
-    // Parametri Base
     double idealSleep = (profile.age > 60) ? 7.0 : 8.0;
 
-    // 1. PROCESSO S (Homeostatic Sleep Pressure)
-    double homeostaticEnergy = 100.0;
+    // 1. DEBITO STORICO
     double cumulativeDebt = 0.0;
-
     if (history.isNotEmpty) {
       for (int i = 3; i > 0; i--) {
         DateTime pastDate = targetDate.subtract(Duration(days: i));
@@ -78,103 +73,160 @@ class SimulationRepository {
         double diff = idealSleep - slept;
         cumulativeDebt += diff > 0 ? diff : 0;
       }
-      homeostaticEnergy -= (cumulativeDebt * 5.0);
     }
 
+    // 2. TIMING
     double lastNightSleep = currentInput.sleepHours;
-    if (lastNightSleep < idealSleep && lastNightSleep > 0) {
-      homeostaticEnergy -= (idealSleep - lastNightSleep) * 5.0;
-    }
+    DateTime wakeUpTime = DateTime(targetDate.year, targetDate.month, targetDate.day, 8, 0);
 
-    // 2. WAKE DECAY (Ore di Veglia)
-    double hoursAwake = 0.0;
-    if (isToday) {
-      double currentHour = now.hour + (now.minute / 60.0);
-      double wakeUpHour = 7.5; // Assumiamo sveglia media 7:30 se non specificato
-      hoursAwake = currentHour - wakeUpHour;
-      if (hoursAwake < 0) hoursAwake = 0;
-    }
+    if (currentInput.usePreciseTiming && currentInput.wakeTimeStr != null && currentInput.bedTimeStr != null) {
+      try {
+        int wakeH = int.parse(currentInput.wakeTimeStr!.split(":")[0]);
+        int wakeM = int.parse(currentInput.wakeTimeStr!.split(":")[1]);
+        int bedH = int.parse(currentInput.bedTimeStr!.split(":")[0]);
+        int bedM = int.parse(currentInput.bedTimeStr!.split(":")[1]);
 
-    double wakeDrain = hoursAwake * 3.5;
-    homeostaticEnergy -= wakeDrain;
+        wakeUpTime = DateTime(targetDate.year, targetDate.month, targetDate.day, wakeH, wakeM);
 
-    // 3. PROCESSO C (Ritmo Circadiano)
-    double circadianFactor = 0.0;
-    if (isToday) {
-      double hour = now.hour + (now.minute / 60.0);
-      circadianFactor = sin(((hour - 10) * pi) / 12) * 10;
-    }
+        double bedDouble = bedH + (bedM / 60.0);
+        double wakeDouble = wakeH + (wakeM / 60.0);
 
-    // -------------------------------------------------------------------------
-    // 4. FISICA DELL'IDRATAZIONE (Aggiornata per Pacing 90 min)
-    // -------------------------------------------------------------------------
-    // Regola: 1 bicchiere (0.2L) ogni 1.5 ore (90 min) di veglia.
-    // Questo crea una curva di fabbisogno graduale.
-
-    double waterNeed = (hoursAwake / 1.5) * 0.2;
-    if (waterNeed < 0.2) waterNeed = 0.2; // Minimo 1 bicchiere al mattino
-
-    double hydrationRatio = 1.0;
-    bool needsWaterNow = false;
-    bool isHydrationOptimal = false; // Nuovo flag per il premio
-
-    if (isToday) {
-      if (currentInput.waterLiters < waterNeed) {
-        // Se sei indietro
-        double deficit = (waterNeed - currentInput.waterLiters);
-        // Alert scatta se mancano più di 250ml (più di un bicchiere)
-        if (deficit > 0.25) {
-          hydrationRatio = 0.85;
-          needsWaterNow = true;
-        } else if (deficit > 0.1) {
-          hydrationRatio = 0.95;
+        if (wakeDouble > bedDouble) {
+          lastNightSleep = wakeDouble - bedDouble;
+        } else {
+          lastNightSleep = (24.0 - bedDouble) + wakeDouble;
         }
-      } else {
-        // Se sei in pari o sopra -> PREMIO
-        isHydrationOptimal = true;
-        // Piccolo bonus energetico (fittizio) per gratificazione
-        hydrationRatio = 1.02;
+      } catch (e) {
+        // Fallback in caso di parse error
+        lastNightSleep = currentInput.sleepHours;
       }
     }
 
-    // -------------------------------------------------------------------------
-    // CALCOLO FINALE
-    // -------------------------------------------------------------------------
-
-    double totalEnergy = (homeostaticEnergy + circadianFactor) * hydrationRatio;
-
-    // Safety check
-    if (lastNightSleep >= 7 && currentInput.waterLiters >= 0.5 && hoursAwake < 4) {
-      if (totalEnergy < 75) totalEnergy = 75;
+    // 3. CALCOLO STATO ATTUALE
+    double hoursAwake = 0.0;
+    if (isToday) {
+      hoursAwake = now.difference(wakeUpTime).inMinutes / 60.0;
+      if (hoursAwake < 0) hoursAwake = 0;
     }
 
-    // --- Messaggi Empatici e Gratificanti ---
-    String message = "Physiological state stable.";
+    double waterNeed = (hoursAwake / 1.5) * 0.2;
+    if (waterNeed < 0.2) waterNeed = 0.2;
 
-    if (needsWaterNow) {
-      message = "You're falling behind on hydration. Drink a glass now to recover focus.";
-    } else if (isHydrationOptimal && isToday) {
-      // MESSAGGIO DI PREMIO
-      message = "Hydration optimal! Your brain is performing at peak efficiency.";
-    } else if (cumulativeDebt > 5) {
-      message = "Adenosine levels high. Prioritize sleep tonight.";
-    } else if (circadianFactor < -5 && isToday) {
-      message = "Afternoon dip detected. It's natural to feel slower now.";
-    } else if (totalEnergy < 20) {
-      message = "Energy critical. Rest required.";
+    // Calcoliamo l'energia corrente ANCHE se non c'è timing preciso (per la card header)
+    double currentEnergy = _calculateEnergyAtMoment(
+        cumulativeDebt, lastNightSleep, hoursAwake, currentInput.waterLiters, waterNeed, idealSleep, now.hour + (now.minute/60.0)
+    );
+
+    bool needsWaterNow = false;
+    if (isToday && currentInput.waterLiters < waterNeed && (waterNeed - currentInput.waterLiters > 0.25)) {
+      needsWaterNow = true;
     }
 
-    bool showEnergyChart = isToday;
+    // 4. GENERAZIONE CURVA (Solo se Precise Timing)
+    List<EnergyPoint> curve = [];
+    String? suggestedBedTime;
+
+    if (currentInput.usePreciseTiming && isToday) {
+      DateTime iterator = wakeUpTime;
+      DateTime endOfDay = DateTime(targetDate.year, targetDate.month, targetDate.day, 23, 59);
+
+      int waterIntervalCounter = 0;
+
+      while (iterator.isBefore(endOfDay)) {
+        double iterHoursAwake = iterator.difference(wakeUpTime).inMinutes / 60.0;
+        if (iterHoursAwake < 0) iterHoursAwake = 0;
+
+        // Fabbisogno d'acqua a quell'ora specifica del grafico
+        double iterWaterNeed = (iterHoursAwake / 1.5) * 0.2;
+
+        // CRUCIALE: Per i punti futuri, usiamo l'acqua ATTUALE bevuta dall'utente.
+        // Se l'utente ha appena bevuto 2L, currentInput.waterLiters è alto.
+        // Questo farà sì che la curva futura si alzi perché il deficit diminuisce.
+        double waterToUse = currentInput.waterLiters;
+
+        // Se siamo nel passato profondo (es. grafico alle 10:00 e ora sono le 18:00),
+        // idealmente dovremmo sapere quanto avevi bevuto alle 10:00. Non avendo storico orario,
+        // approssimiamo dicendo: "Nel passato eri ideale, nel futuro dipendi da quanto hai bevuto oggi".
+        if (iterator.isBefore(now.subtract(const Duration(minutes: 30)))) {
+          waterToUse = iterWaterNeed; // Assumiamo passato ideale per pulizia grafico
+        }
+
+        double e = _calculateEnergyAtMoment(
+            cumulativeDebt, lastNightSleep, iterHoursAwake, waterToUse, iterWaterNeed, idealSleep, iterator.hour + (iterator.minute/60.0)
+        );
+
+        bool isWaterTime = false;
+        // Marker acqua ogni 90 min circa
+        if (iterHoursAwake > 0 && iterHoursAwake % 1.5 < 0.5 && waterIntervalCounter > 2) {
+          isWaterTime = true;
+          waterIntervalCounter = 0;
+        }
+        waterIntervalCounter++;
+
+        curve.add(EnergyPoint(
+          time: iterator,
+          energyLevel: e.toInt(),
+          isPast: iterator.isBefore(now),
+          isWaterTime: isWaterTime,
+        ));
+
+        iterator = iterator.add(const Duration(minutes: 30));
+      }
+
+      if (cumulativeDebt > 2 || lastNightSleep < 6) {
+        suggestedBedTime = "21:30";
+      } else {
+        suggestedBedTime = "23:00";
+      }
+    }
+
+    String message = "Systems nominal.";
+    if (needsWaterNow) message = "Hydration low. Drink to boost chart.";
+    else if (currentEnergy < 30) message = "Energy critical.";
+    else if (cumulativeDebt > 5) message = "Recovery sleep needed.";
 
     return SimulationResult(
-      energyPercentage: totalEnergy.clamp(0, 100).toInt(),
+      energyPercentage: currentEnergy.clamp(0, 100).toInt(),
       sleepDebtHours: cumulativeDebt,
       hydrationStatus: (currentInput.waterLiters / (waterNeed + 0.01) * 100).clamp(0, 100),
       predictionMessage: message,
       isPrediction: isForecast,
-      isDayStarted: currentInput.sleepHours > 0 || currentInput.waterLiters > 0,
+      isDayStarted: currentInput.sleepHours > 0 || currentInput.usePreciseTiming,
       needsWaterNow: needsWaterNow,
-      showChart: showEnergyChart,
+      showChart: currentInput.usePreciseTiming,
+      energyCurve: curve,
+      suggestedBedTime: suggestedBedTime,
     );
+  }
+
+  double _calculateEnergyAtMoment(double histDebt, double lastSleep, double hAwake, double waterIn, double waterReq, double idealSleep, double clockHour) {
+    double energy = 100.0;
+
+    // 1. Debito
+    energy -= (histDebt * 5.0);
+    // 2. Stanotte
+    if (lastSleep < idealSleep) energy -= (idealSleep - lastSleep) * 5.0;
+    // 3. Wake Drain
+    energy -= (hAwake * 3.5);
+    // 4. Circadiano
+    double circ = sin(((clockHour - 10) * pi) / 12) * 10;
+
+    // 5. Idratazione
+    double hydRatio = 1.0;
+    if (waterIn < waterReq) {
+      double def = waterReq - waterIn;
+      if (def > 0.4) hydRatio = 0.85;
+      else if (def > 0.1) hydRatio = 0.95;
+    } else {
+      // Piccolo bonus se idratato bene
+      hydRatio = 1.02;
+    }
+
+    double total = (energy + circ) * hydRatio;
+
+    // Safety Net
+    if (lastSleep >= 6 && waterIn >= 0.5 && hAwake < 4 && total < 60) total = 65;
+
+    return total.clamp(0, 100);
   }
 }
