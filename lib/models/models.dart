@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-// --- User Profile (Setup) ---
+// ... UserProfile e DailyInput (Invariati) ...
 class UserProfile {
   final int age;
   final double weightKg;
@@ -15,18 +15,11 @@ class UserProfile {
   });
 
   double get bmi => weightKg / ((heightCm / 100) * (heightCm / 100));
-
   static const empty = UserProfile(age: 0, weightKg: 0, heightCm: 0);
-  bool get isSet => age > 0; // Check if user has completed setup
+  bool get isSet => age > 0;
 
-  // Serialization for Disk Storage
   Map<String, dynamic> toMap() {
-    return {
-      'age': age,
-      'weightKg': weightKg,
-      'heightCm': heightCm,
-      'gender': gender,
-    };
+    return {'age': age, 'weightKg': weightKg, 'heightCm': heightCm, 'gender': gender};
   }
 
   factory UserProfile.fromMap(Map<String, dynamic> map) {
@@ -37,12 +30,10 @@ class UserProfile {
       gender: map['gender'] ?? 'M',
     );
   }
-
   String toJson() => json.encode(toMap());
   factory UserProfile.fromJson(String source) => UserProfile.fromMap(json.decode(source));
 }
 
-// --- Daily Inputs (Sleep & Water) ---
 class DailyInput {
   final double sleepHours;
   final double waterLiters;
@@ -62,31 +53,29 @@ class DailyInput {
     );
   }
 
-  // Serialization
-  Map<String, dynamic> toMap() {
-    return {
-      'sleepHours': sleepHours,
-      'waterLiters': waterLiters,
-      'activityLevel': activityLevel,
-    };
-  }
+  Map<String, dynamic> toMap() => {
+    'sleepHours': sleepHours,
+    'waterLiters': waterLiters,
+    'activityLevel': activityLevel,
+  };
 
-  factory DailyInput.fromMap(Map<String, dynamic> map) {
-    return DailyInput(
-      sleepHours: map['sleepHours']?.toDouble() ?? 0.0,
-      waterLiters: map['waterLiters']?.toDouble() ?? 0.0,
-      activityLevel: map['activityLevel']?.toDouble() ?? 1.2,
-    );
-  }
+  factory DailyInput.fromMap(Map<String, dynamic> map) => DailyInput(
+    sleepHours: map['sleepHours']?.toDouble() ?? 0.0,
+    waterLiters: map['waterLiters']?.toDouble() ?? 0.0,
+    activityLevel: map['activityLevel']?.toDouble() ?? 1.2,
+  );
 }
+
+// --- Simulation Result ---
 class SimulationResult {
   final int energyPercentage;
-  final double sleepDebtHours;
+  final double sleepDebtHours; // Debito accumulato
   final double hydrationStatus;
   final String predictionMessage;
   final bool isPrediction;
   final bool isDayStarted;
-  final bool needsWaterNow; // NUOVO: true se devo bere ORA
+  final bool needsWaterNow;
+  final bool showChart; // Se false, nasconde il grafico energia (per i giorni passati)
 
   const SimulationResult({
     required this.energyPercentage,
@@ -96,6 +85,7 @@ class SimulationResult {
     this.isPrediction = false,
     this.isDayStarted = false,
     this.needsWaterNow = false,
+    this.showChart = true,
   });
 
   static const initial = SimulationResult(
@@ -105,5 +95,6 @@ class SimulationResult {
     predictionMessage: "Ready.",
     isDayStarted: false,
     needsWaterNow: false,
+    showChart: true,
   );
 }

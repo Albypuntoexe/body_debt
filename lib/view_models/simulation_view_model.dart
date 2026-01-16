@@ -20,7 +20,6 @@ class SimulationViewModel extends ChangeNotifier {
 
   Timer? _refreshTimer;
 
-  // Costruttore con Dependency Injection
   SimulationViewModel(this._repository, this._notifications) {
     _init();
     _startRealTimeUpdates();
@@ -28,18 +27,14 @@ class SimulationViewModel extends ChangeNotifier {
 
   @override
   void dispose() {
-    _refreshTimer?.cancel(); // Importante: ferma il timer quando chiudi l'app
+    _refreshTimer?.cancel();
     super.dispose();
   }
 
   void _startRealTimeUpdates() {
-    // Aggiorna la simulazione ogni 60 secondi
     _refreshTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
-      // Ricalcola SOLO se stiamo guardando la giornata odierna e se è iniziata
       if (isSelectedDateToday && _result.isDayStarted && !_isWhatIfMode) {
         _calculate(save: false);
-
-        // Se serve acqua e le notifiche sono attive, invia alert
         if (_result.needsWaterNow && _notifications.areNotificationsEnabled) {
           _notifications.showHydrationReminder();
         }
@@ -71,16 +66,10 @@ class SimulationViewModel extends ChangeNotifier {
   // --- Initialization ---
   Future<void> _init() async {
     _userProfile = _repository.loadProfile();
-
-    // Normalizza la data a Oggi
     final now = DateTime.now();
     _selectedDate = DateTime(now.year, now.month, now.day);
-
     _currentInput = _repository.loadLogForDate(_selectedDate);
-
-    // Se abbiamo già dormito, il check mattutino è fatto
     if (_currentInput.sleepHours > 0) _morningCheckDone = true;
-
     _calculate(save: false);
     _isLoading = false;
     notifyListeners();
@@ -107,12 +96,7 @@ class SimulationViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- Logic & Inputs ---
-
-  void markMorningPromptSeen() {
-    _morningCheckDone = true;
-    notifyListeners();
-  }
+  void markMorningPromptSeen() { _morningCheckDone = true; notifyListeners(); }
 
   void answerMorningPrompt(double sleep) {
     updateInputs(sleep: sleep);
@@ -142,9 +126,11 @@ class SimulationViewModel extends ChangeNotifier {
   }
 
   void _calculate({required bool save}) {
+    // Passiamo _selectedDate al repository per il calcolo storico
     _result = _repository.runSimulation(
         _userProfile,
         _currentInput,
+        _selectedDate,
         isForecast: _isWhatIfMode
     );
 
@@ -167,7 +153,7 @@ class SimulationViewModel extends ChangeNotifier {
     _currentInput = const DailyInput();
     _result = SimulationResult.initial;
     _userProfile = UserProfile.empty;
-    await _init(); // Ricarica tutto da zero
+    await _init();
     notifyListeners();
   }
 }

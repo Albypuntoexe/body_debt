@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../view_models/simulation_view_model.dart';
 import '../models/models.dart';
 import 'setup_screen.dart';
-import 'settings_screen.dart'; // Import necessario
+import 'settings_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -25,7 +25,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void _checkMorningPrompt() {
     final vm = context.read<SimulationViewModel>();
     final hour = DateTime.now().hour;
-
     if (vm.isSelectedDateToday && hour >= 5 && vm.shouldShowMorningPrompt) {
       showDialog(
         context: context,
@@ -47,9 +46,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           title: Consumer<SimulationViewModel>(
             builder: (context, vm, _) {
               final date = vm.selectedDate;
+              // Semplice controllo data
               final now = DateTime.now();
               final isToday = date.year == now.year && date.month == now.month && date.day == now.day;
-              return Text(isToday ? "BODY DEBT // LIVE" : "HISTORY: ${date.day}/${date.month}");
+              return Text(isToday ? "BODY DEBT // LIVE" : "HISTORY LOG");
             },
           ),
           actions: [
@@ -63,6 +63,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         body: Consumer<SimulationViewModel>(
           builder: (context, vm, _) {
             final res = vm.result;
+            // Se non c'è dato E non è iniziato il giorno
             final hasNoData = !res.isDayStarted && vm.input.sleepHours == 0;
 
             return Column(
@@ -77,41 +78,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _buildEnergyCard(context, res),
+                        // 1. Mostra il grafico SOLO se showChart è true (Oggi)
+                        if (res.showChart)
+                          _buildEnergyCard(context, res)
+                        else
+                          _buildHistoryModeBanner(context, vm), // Altrimenti Banner Storico
+
                         const SizedBox(height: 16),
 
-                        // --- NUOVO: ALERT IDRATAZIONE ---
+                        // 2. Alert Idratazione (Solo Oggi)
                         if (res.needsWaterNow && vm.isSelectedDateToday)
-                          Container(
-                            margin: const EdgeInsets.only(bottom: 16),
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.blueAccent.withOpacity(0.2),
-                              border: Border.all(color: Colors.blueAccent),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              children: const [
-                                Icon(Icons.water_drop, color: Colors.blueAccent),
-                                SizedBox(width: 12),
-                                Expanded(
-                                    child: Text(
-                                        "Drain Alert: Hydration needed immediately to stop energy loss.",
-                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)
-                                    )
-                                ),
-                              ],
-                            ),
-                          ),
-                        // --------------------------------
+                          _buildHydrationAlert(),
 
+                        // 3. Insight Box
                         _buildPredictionBox(context, res),
                       ],
                     ),
                   ),
                 ),
 
-                // BOTTOM TABS
+                // BOTTOM TABS (Sempre visibili per editing)
                 const Divider(height: 1),
                 Container(
                   color: Theme.of(context).cardColor,
@@ -142,6 +128,58 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // --- WIDGETS ---
 
+  // Banner per quando siamo nel passato
+  Widget _buildHistoryModeBanner(BuildContext context, SimulationViewModel vm) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.grey.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.withOpacity(0.3)),
+      ),
+      child: Column(
+        children: [
+          Icon(Icons.edit_calendar, size: 48, color: Theme.of(context).colorScheme.secondary),
+          const SizedBox(height: 16),
+          Text(
+            "EDITING PAST RECORD: ${vm.selectedDate.day}/${vm.selectedDate.month}",
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            "Updating this data will recalculate your Cumulative Sleep Debt for today.",
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHydrationAlert() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.blueAccent.withOpacity(0.2),
+        border: Border.all(color: Colors.blueAccent),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: const [
+          Icon(Icons.water_drop, color: Colors.blueAccent),
+          SizedBox(width: 12),
+          Expanded(
+              child: Text(
+                  "Drain Alert: Hydration needed immediately to stop energy loss.",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)
+              )
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildEmptyState(BuildContext context, SimulationViewModel vm) {
     return Center(
       child: Padding(
@@ -156,7 +194,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             const SizedBox(height: 16),
             Text(
-              vm.isSelectedDateToday ? "Good Morning" : "No Data Recorded",
+              vm.isSelectedDateToday ? "Good Morning" : "No Log Found",
               style: Theme.of(context).textTheme.headlineMedium,
               textAlign: TextAlign.center,
             ),
@@ -164,7 +202,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Text(
               vm.isSelectedDateToday
                   ? "Start your day by logging last night's rest."
-                  : "No logs found for this date. Use the Sleep tab below to add history.",
+                  : "No data for this day. Add sleep info below to fix your history.",
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.grey),
             ),
@@ -215,7 +253,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           else
             ElevatedButton(
               onPressed: vm.commitData,
-              child: Text(vm.isSelectedDateToday ? "Save Updates" : "Save History Log"),
+              child: Text(vm.isSelectedDateToday ? "Save Updates" : "Correct History"),
             ),
         ],
       ),
@@ -323,7 +361,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
-            const Text("CURRENT ENERGY"), // Cambiato da Predicted a Current
+            const Text("CURRENT ENERGY"),
             const SizedBox(height: 8),
             Text(
               "${res.energyPercentage}%",
@@ -353,6 +391,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const Text("SYSTEM STATUS", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
           const SizedBox(height: 4),
           Text(res.predictionMessage, style: const TextStyle(fontStyle: FontStyle.italic)),
+          if (res.sleepDebtHours > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 8.0),
+              child: Text("Accumulated Debt: ${res.sleepDebtHours.toStringAsFixed(1)}h",
+                  style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+            )
         ],
       ),
     );
@@ -368,7 +412,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             title: const Text("Settings & Reset"),
             onTap: () {
               Navigator.pop(context);
-              // Naviga alla schermata Impostazioni
               Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
             },
           )

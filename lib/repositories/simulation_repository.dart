@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math'; // Necessario per il calcolo Circadiano
 import '../models/models.dart';
 import '../services/preferences_service.dart';
 
@@ -10,132 +11,185 @@ class SimulationRepository {
 
   SimulationRepository(this._service);
 
-  // --- Profile Management ---
+  // --- Profile & History Loading ---
   UserProfile loadProfile() {
     final jsonStr = _service.getString(_keyProfile);
     if (jsonStr == null) return UserProfile.empty;
-    return UserProfile.fromJson(jsonStr);
+    try { return UserProfile.fromJson(jsonStr); } catch (e) { return UserProfile.empty; }
   }
 
   Future<void> saveProfile(UserProfile profile) async {
     await _service.setString(_keyProfile, profile.toJson());
   }
 
-  // --- History & Calendar Management ---
-
-  /// Loads the specific log for a date. If none exists, returns default.
   DailyInput loadLogForDate(DateTime date) {
     final history = _loadHistoryMap();
     final key = _dateToKey(date);
-
     if (history.containsKey(key)) {
       return DailyInput.fromMap(history[key]);
     }
-    return const DailyInput(); // Return empty/default if no data for that day
+    return const DailyInput();
   }
 
-  /// Saves the log for a specific date to disk
   Future<void> saveLogForDate(DateTime date, DailyInput input) async {
     final history = _loadHistoryMap();
     final key = _dateToKey(date);
-
     history[key] = input.toMap();
-
-    // Convert entire map back to JSON and save
     await _service.setString(_keyHistory, json.encode(history));
   }
 
-  /// Helper: Load full history from disk
   Map<String, dynamic> _loadHistoryMap() {
     final jsonStr = _service.getString(_keyHistory);
     if (jsonStr == null) return {};
-    return json.decode(jsonStr) as Map<String, dynamic>;
+    try { return json.decode(jsonStr) as Map<String, dynamic>; } catch (e) { return {}; }
   }
 
-  /// Helper: Format Date key (YYYY-MM-DD) to ignore time
   String _dateToKey(DateTime date) {
     return "${date.year}-${date.month.toString().padLeft(2,'0')}-${date.day.toString().padLeft(2,'0')}";
   }
 
-  SimulationResult runSimulation(UserProfile profile, DailyInput input, {bool isForecast = false}) {
-    if (!profile.isSet) return SimulationResult.initial;
-
-    // Se non ci sono dati, giorno non iniziato
-    if (input.sleepHours == 0 && input.waterLiters == 0 && !isForecast) {
-      return const SimulationResult(
-        energyPercentage: 0,
-        sleepDebtHours: 0,
-        hydrationStatus: 0,
-        predictionMessage: "Waiting for data...",
-        isPrediction: false,
-        isDayStarted: false,
-      );
-    }
-
-    final now = DateTime.now();
-    // Assumiamo sveglia alle 8:00 se non specificato (per semplicità)
-    final wakeUpTime = DateTime(now.year, now.month, now.day, 8, 0);
-
-    // Calcolo ore passate dalla sveglia (minimo 0)
-    double hoursAwake = now.difference(wakeUpTime).inMinutes / 60.0;
-    if (hoursAwake < 0) hoursAwake = 0; // Prima delle 8:00
-
-    // --- 1. IDRATAZIONE TEMPORALE ---
-    // Regola: 1 bicchiere (200ml) ogni 90 minuti (1.5 ore) è l'ideale.
-    double idealWaterIntake = (hoursAwake / 1.5) * 0.2;
-    if (idealWaterIntake < 0.2) idealWaterIntake = 0.2; // Almeno un bicchiere per iniziare
-
-    // Deficit idrico attuale
-    double waterDeficit = idealWaterIntake - input.waterLiters;
-    bool needsWaterNow = waterDeficit > 0.15; // Se mancano quasi un bicchiere (150ml)
-
-    // --- 2. DRAIN ENERGETICO ---
-    double baseEnergy = 100.0;
-
-    // Penalità Sonno (Start Level)
-    double requiredSleep = (profile.age > 60) ? 7.0 : 8.0;
-    if (input.sleepHours < requiredSleep) {
-      baseEnergy -= (requiredSleep - input.sleepHours) * 10;
-    }
-
-    // Decay Rate (Scarica oraria)
-    // Base: -4% energia all'ora.
-    // Se disidratato: il decadimento accelera a -8% all'ora!
-    double hourlyDecay = 4.0;
-    if (needsWaterNow) {
-      hourlyDecay = 8.0; // IL DOPPIO DELLA FATICA SE NON BEVI
-    }
-
-    double currentEnergy = baseEnergy - (hoursAwake * hourlyDecay);
-
-    // Bonus parziali (Sonno extra recuperato o cibo) possono essere aggiunti qui
-    // Clamp finale
-    currentEnergy = currentEnergy.clamp(0.0, 100.0);
-
-    // --- MESSAGGI ---
-    String message = "Energy levels stable.";
-
-    if (needsWaterNow) {
-      message = "Hydration alert: You are lagging behind. Drink a glass now to stop the energy drain.";
-    } else if (currentEnergy < 30) {
-      message = "Battery Low. Mental focus is compromised.";
-    } else if (hoursAwake > 14) {
-      message = "End of day approaching. Wind down naturally.";
-    } else if (input.sleepHours < requiredSleep) {
-      message = "Running on caffeine and willpower due to sleep debt.";
-    }
-
-    return SimulationResult(
-      energyPercentage: currentEnergy.toInt(),
-      sleepDebtHours: (requiredSleep - input.sleepHours).clamp(0, 24),
-      hydrationStatus: (input.waterLiters / (idealWaterIntake + 0.5)) * 100, // Status vs Ideal so far
-      predictionMessage: message,
-      isPrediction: isForecast,
-      isDayStarted: true,
-      needsWaterNow: needsWaterNow, // NUOVO CAMPO (vedi sotto)
-    );
-  }
   Future<void> clearAllData() async {
     await _service.clear();
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // ALGORITMO BORBÉLY (Two-Process Model) + Hydration Physics
+  // ════════════════════════════════════════════════════════════════════════════
+
+  SimulationResult runSimulation(UserProfile profile, DailyInput currentInput, DateTime targetDate, {bool isForecast = false}) {
+    if (!profile.isSet) return SimulationResult.initial;
+
+    final history = _loadHistoryMap();
+    final now = DateTime.now();
+    bool isToday = targetDate.year == now.year && targetDate.month == now.month && targetDate.day == now.day;
+
+    // Parametri Base
+    double idealSleep = (profile.age > 60) ? 7.0 : 8.0;
+
+    // -------------------------------------------------------------------------
+    // 1. PROCESSO S (Homeostatic Sleep Pressure) - Il "Serbatoio"
+    // -------------------------------------------------------------------------
+
+    double homeostaticEnergy = 100.0;
+    double cumulativeDebt = 0.0; // Definita qui come cumulativeDebt
+
+    // Analizziamo gli ultimi 3 giorni (impatto maggiore)
+    if (history.isNotEmpty) {
+      for (int i = 3; i > 0; i--) {
+        DateTime pastDate = targetDate.subtract(Duration(days: i));
+        String key = _dateToKey(pastDate);
+
+        double slept;
+        if (history.containsKey(key)) {
+          slept = DailyInput.fromMap(history[key]).sleepHours;
+        } else {
+          // Giorno mancante: Assumiamo media statistica (neutro)
+          slept = idealSleep;
+        }
+
+        double diff = idealSleep - slept;
+        cumulativeDebt += diff > 0 ? diff : 0;
+      }
+
+      // Penalità storica (max 5% per ora di debito)
+      homeostaticEnergy -= (cumulativeDebt * 5.0);
+    }
+
+    // Applicazione del sonno della notte appena trascorsa
+    double lastNightSleep = currentInput.sleepHours;
+
+    if (lastNightSleep < idealSleep && lastNightSleep > 0) {
+      // Penalità lineare per sonno insufficiente stanotte
+      homeostaticEnergy -= (idealSleep - lastNightSleep) * 5.0;
+    }
+
+    // -------------------------------------------------------------------------
+    // 2. WAKE DECAY (Il consumo durante il giorno)
+    // -------------------------------------------------------------------------
+
+    double hoursAwake = 0.0;
+    if (isToday) {
+      double currentHour = now.hour + (now.minute / 60.0);
+      double wakeUpHour = 7.0; // Media statistica sveglia
+
+      hoursAwake = currentHour - wakeUpHour;
+      if (hoursAwake < 0) hoursAwake = 0;
+    }
+
+    // L'energia cala fisiologicamente circa 3.5% all'ora mentre sei sveglio
+    double wakeDrain = hoursAwake * 3.5;
+    homeostaticEnergy -= wakeDrain;
+
+    // -------------------------------------------------------------------------
+    // 3. PROCESSO C (Ritmo Circadiano)
+    // -------------------------------------------------------------------------
+
+    double circadianFactor = 0.0;
+    if (isToday) {
+      double hour = now.hour + (now.minute / 60.0);
+      // Formula semplificata del ritmo circadiano (Seno spostato)
+      circadianFactor = sin(((hour - 10) * pi) / 12) * 10;
+    }
+
+    // -------------------------------------------------------------------------
+    // 4. IDRATAZIONE (Fattore Moltiplicativo)
+    // -------------------------------------------------------------------------
+
+    double waterNeed = (hoursAwake * 0.2);
+    if (waterNeed < 0.2) waterNeed = 0.2;
+
+    double hydrationRatio = 1.0;
+    bool needsWaterNow = false;
+
+    if (isToday) {
+      if (currentInput.waterLiters < waterNeed) {
+        double deficit = (waterNeed - currentInput.waterLiters);
+        if (deficit > 0.4) {
+          hydrationRatio = 0.85; // -15% Efficienza
+          needsWaterNow = true;
+        } else if (deficit > 0.2) {
+          hydrationRatio = 0.95; // -5% Efficienza
+        }
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // CALCOLO FINALE
+    // -------------------------------------------------------------------------
+
+    double totalEnergy = homeostaticEnergy + circadianFactor;
+    totalEnergy = totalEnergy * hydrationRatio;
+
+    // Safety check: Se ho dormito bene e bevuto, e sono le 10 di mattina, non posso essere morto.
+    if (lastNightSleep >= 7 && currentInput.waterLiters >= 0.5 && hoursAwake < 4) {
+      if (totalEnergy < 70) totalEnergy = 75;
+    }
+
+    String message = "Physiological state stable.";
+
+    if (needsWaterNow) {
+      message = "Cognitive efficiency dropped by 15% due to dehydration.";
+    } else if (cumulativeDebt > 5) {
+      message = "Adenosine levels high due to chronic sleep debt.";
+    } else if (circadianFactor < -5 && isToday) {
+      message = "Circadian dip detected (Afternoon slump).";
+    } else if (circadianFactor > 5 && isToday) {
+      message = "Circadian peak active. High alertness window.";
+    } else if (totalEnergy < 20) {
+      message = "Sleep pressure critical. Reaction times impaired.";
+    }
+
+    bool showEnergyChart = isToday;
+
+    return SimulationResult(
+      energyPercentage: totalEnergy.clamp(0, 100).toInt(),
+      sleepDebtHours: cumulativeDebt, // FIX: Usiamo la variabile corretta
+      hydrationStatus: (currentInput.waterLiters / (waterNeed + 0.1) * 100).clamp(0, 100),
+      predictionMessage: message,
+      isPrediction: isForecast,
+      isDayStarted: currentInput.sleepHours > 0 || currentInput.waterLiters > 0,
+      needsWaterNow: needsWaterNow,
+      showChart: showEnergyChart,
+    );
   }
 }
