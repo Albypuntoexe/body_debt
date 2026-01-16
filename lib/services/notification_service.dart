@@ -6,13 +6,21 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _notificationsPlugin = FlutterLocalNotificationsPlugin();
 
   static const _keyNotificationsEnabled = 'notifications_enabled';
+
+  // Chiave per salvare l'orario dell'ultima notifica inviata
+  static const _keyLastNotificationTime = 'last_notification_timestamp';
+
+  // INTERVALLO MINIMO TRA LE NOTIFICHE (Anti-Spam)
+  // 30 minuti = Non riceverai più di 1 notifica ogni mezz'ora, anche se il sistema controlla ogni minuto.
+  static const int _cooldownMinutes = 60;
+
   bool _isInitialized = false;
 
   NotificationService(this._prefs);
 
   bool get areNotificationsEnabled => _prefs.getBool(_keyNotificationsEnabled) ?? true;
 
-  // Inizializzazione COMPLETA (chiamata dalla UI nel main)
+  // Inizializzazione COMPLETA (Foreground)
   Future<void> init() async {
     if (_isInitialized) return;
     const AndroidInitializationSettings initializationSettingsAndroid =
@@ -25,7 +33,7 @@ class NotificationService {
     _isInitialized = true;
   }
 
-  // Inizializzazione LIGHT (chiamata dal Background Worker)
+  // Inizializzazione LIGHT (Background)
   Future<void> initBackground() async {
     const AndroidInitializationSettings initializationSettingsAndroid =
     AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -50,10 +58,32 @@ class NotificationService {
     }
   }
 
-  // Metodo reso generico per essere usato dal background
+  // ════════════════════════════════════════════════════════════════════════════
+  // LOGICA ANTI-SPAM
+  // ════════════════════════════════════════════════════════════════════════════
+
   Future<void> showHydrationReminder({String title = 'BodyDebt Alert 💧', String body = 'Energy drain detected! Drink water.'}) async {
     if (!areNotificationsEnabled) return;
 
+    // 1. CONTROLLO COOLDOWN
+    // Recuperiamo l'ultimo timestamp salvato (in millisecondi)
+    // Usiamo una chiave generica su SharedPreferences perché PreferencesService non ha getInt,
+    // quindi dobbiamo usare getDouble o modificare PreferencesService.
+    // Per semplicità e robustezza, assumiamo che PreferencesService supporti salvataggio stringhe o double.
+    // Qui userò la logica basata su stringa per massima compatibilità con il tuo codice attuale.
+
+    String? lastTimeStr = _prefs.getString(_keyLastNotificationTime);
+    if (lastTimeStr != null) {
+      DateTime lastTime = DateTime.parse(lastTimeStr);
+      final difference = DateTime.now().difference(lastTime).inMinutes;
+
+      if (difference < _cooldownMinutes) {
+        print("[NOTIFICATION BLOCKED] Anti-Spam attivo. Ultima notifica inviata $difference min fa.");
+        return; // ESCI: Non inviare nulla
+      }
+    }
+
+    // 2. CONFIGURAZIONE NOTIFICA
     const AndroidNotificationDetails androidPlatformChannelSpecifics =
     AndroidNotificationDetails(
       'hydration_channel_id',
@@ -67,15 +97,24 @@ class NotificationService {
     const NotificationDetails platformChannelSpecifics =
     NotificationDetails(android: androidPlatformChannelSpecifics);
 
+    // 3. INVIO
     await _notificationsPlugin.show(
       0,
       title,
       body,
       platformChannelSpecifics,
     );
+
+    // 4. SALVATAGGIO TIMESTAMP
+    // Salviamo l'ora attuale come "Ultima Notifica Inviata"
+    await _prefs.setString(_keyLastNotificationTime, DateTime.now().toIso8601String());
+
+    print("[NOTIFICATION SENT] Popup inviato. Prossima notifica possibile tra $_cooldownMinutes min.");
   }
 
   Future<void> cancelAll() async {
     await _notificationsPlugin.cancelAll();
+    // Opzionale: Resettare il cooldown quando si disattiva?
+    // await _prefs.remove(_keyLastNotificationTime);
   }
 }

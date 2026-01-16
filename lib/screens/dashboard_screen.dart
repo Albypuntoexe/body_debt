@@ -36,23 +36,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final needsSetup = context.select<SimulationViewModel, bool>((vm) => vm.isSetupRequired);
     if (needsSetup) return const SetupScreen();
 
+    final isFuture = context.select<SimulationViewModel, bool>((vm) => vm.isFutureDate);
+    final isPast = context.select<SimulationViewModel, bool>((vm) => vm.isPastDate);
+
     return DefaultTabController(
       length: 3,
-      initialIndex: 1, // Parte dal tab centrale (Chart/Info)
+      initialIndex: isFuture ? 1 : 1,
       child: Scaffold(
         appBar: AppBar(
           title: Consumer<SimulationViewModel>(
             builder: (context, vm, _) {
               final date = vm.selectedDate;
               final now = DateTime.now();
+              if (vm.isFutureDate) return Text("FORECAST: ${date.day}/${date.month}");
               final isToday = date.year == now.year && date.month == now.month && date.day == now.day;
-              return Text(isToday ? "BODY DEBT // LIVE" : "HISTORY LOG");
+              return Text(isToday ? "BODY DEBT // LIVE" : "HISTORY: ${date.day}/${date.month}");
             },
           ),
           actions: [
             IconButton(
-              icon: const Icon(Icons.calendar_month),
-              onPressed: () => _pickDate(context),
+              icon: const Icon(Icons.calendar_month, color: Colors.cyanAccent),
+              onPressed: () => _openForecastCalendar(context),
             ),
           ],
         ),
@@ -63,31 +67,42 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
             return Column(
               children: [
-                // 1. TOP STATS (SEMPRE VISIBILE)
                 _buildTopStats(context, res, vm),
 
-                // 2. TAB BAR
                 Container(
                   color: Theme.of(context).cardColor,
-                  child: const TabBar(
+                  child: TabBar(
                     indicatorColor: Colors.cyanAccent,
                     labelColor: Colors.cyanAccent,
                     unselectedLabelColor: Colors.grey,
+                    onTap: (index) {
+                      if (isPast && index == 1) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Chart not available for past logs"), duration: Duration(seconds: 1)));
+                      }
+                    },
                     tabs: [
-                      Tab(icon: Icon(Icons.bed), text: "SLEEP"),
-                      Tab(icon: Icon(Icons.show_chart), text: "CHART"),
-                      Tab(icon: Icon(Icons.water_drop), text: "WATER"),
+                      const Tab(icon: Icon(Icons.bed), text: "SLEEP"),
+                      Tab(icon: Icon(isPast ? Icons.visibility_off : Icons.show_chart), text: "CHART"),
+                      const Tab(icon: Icon(Icons.water_drop), text: "WATER"),
                     ],
                   ),
                 ),
 
-                // 3. CONTENUTO TAB
                 Expanded(
                   child: TabBarView(
+                    physics: isFuture ? const NeverScrollableScrollPhysics() : null,
                     children: [
-                      _buildSleepInputTab(context, vm),
-                      _buildChartTab(context, vm, res),
-                      _buildWaterTab(context, vm),
+                      isFuture
+                          ? _buildLockedTab("Sleep inputs are locked in forecast mode.")
+                          : _buildSleepInputTab(context, vm),
+
+                      isPast
+                          ? _buildLockedTab("Energy Chart is not available for past days.")
+                          : _buildChartTab(context, vm, res),
+
+                      isFuture
+                          ? _buildLockedTab("Water logging locked in forecast mode.")
+                          : _buildWaterTab(context, vm),
                     ],
                   ),
                 ),
@@ -99,9 +114,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // --- TOP STATS HEADER (VISIBILE SEMPRE) ---
+  void _openForecastCalendar(BuildContext context) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const ForecastCalendarScreen()));
+  }
+
+  Widget _buildLockedTab(String msg) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.lock_outline, size: 48, color: Colors.grey),
+          const SizedBox(height: 16),
+          Text(msg, style: const TextStyle(color: Colors.grey)),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTopStats(BuildContext context, SimulationResult res, SimulationViewModel vm) {
     Color energyColor = res.energyPercentage > 70 ? Colors.cyanAccent : (res.energyPercentage > 30 ? Colors.amber : Colors.redAccent);
+    bool isFuture = vm.isFutureDate;
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
@@ -112,15 +144,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          // Energia Corrente
           Column(
             children: [
-              const Text("CURRENT ENERGY", style: TextStyle(fontSize: 10, letterSpacing: 1.2)),
+              Text(isFuture ? "PREDICTED WAKE" : "CURRENT ENERGY", style: const TextStyle(fontSize: 10, letterSpacing: 1.2)),
               const SizedBox(height: 4),
               Text("${res.energyPercentage}%", style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: energyColor)),
             ],
           ),
-          // Debito Accumulato
           Column(
             children: [
               const Text("SLEEP DEBT", style: TextStyle(fontSize: 10, letterSpacing: 1.2)),
@@ -128,38 +158,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Text("${res.sleepDebtHours.toStringAsFixed(1)}h", style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.redAccent)),
             ],
           ),
-          // Bedtime Suggerito (o Status se manca)
-          Column(
-            children: [
-              Text(res.suggestedBedTime != null ? "SUGGESTED BED" : "STATUS", style: const TextStyle(fontSize: 10, letterSpacing: 1.2)),
-              const SizedBox(height: 4),
-              Text(
-                  res.suggestedBedTime ?? (res.needsWaterNow ? "DRINK!" : "OK"),
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white70)
-              ),
-            ],
-          ),
         ],
       ),
     );
   }
 
-  // --- TAB 0: SLEEP INPUTS ---
   Widget _buildSleepInputTab(BuildContext context, SimulationViewModel vm) {
     TimeOfDay wake = const TimeOfDay(hour: 8, minute: 0);
     TimeOfDay bed = const TimeOfDay(hour: 23, minute: 0);
-
     if (vm.input.wakeTimeStr != null) {
-      wake = TimeOfDay(
-          hour: int.parse(vm.input.wakeTimeStr!.split(":")[0]),
-          minute: int.parse(vm.input.wakeTimeStr!.split(":")[1])
-      );
+      wake = TimeOfDay(hour: int.parse(vm.input.wakeTimeStr!.split(":")[0]), minute: int.parse(vm.input.wakeTimeStr!.split(":")[1]));
     }
     if (vm.input.bedTimeStr != null) {
-      bed = TimeOfDay(
-          hour: int.parse(vm.input.bedTimeStr!.split(":")[0]),
-          minute: int.parse(vm.input.bedTimeStr!.split(":")[1])
-      );
+      bed = TimeOfDay(hour: int.parse(vm.input.bedTimeStr!.split(":")[0]), minute: int.parse(vm.input.bedTimeStr!.split(":")[1]));
     }
 
     return SingleChildScrollView(
@@ -167,7 +178,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text("INPUT MODE", style: TextStyle(color: Colors.grey, fontSize: 12)),
           SwitchListTile(
             title: const Text("Precise Scheduling", style: TextStyle(fontWeight: FontWeight.bold)),
             subtitle: const Text("Enable to view Energy Chart"),
@@ -177,59 +187,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const Divider(),
           const SizedBox(height: 20),
-
           if (vm.input.usePreciseTiming) ...[
-            _buildTimePickerRow(context, "Went to Bed (Yesterday)", bed, (t) {
-              vm.setPreciseSleepTimes(t, wake);
-            }),
+            _buildTimePickerRow(context, "Went to Bed", bed, (t) => vm.setPreciseSleepTimes(t, wake)),
             const SizedBox(height: 20),
-            _buildTimePickerRow(context, "Woke Up (Today)", wake, (t) {
-              vm.setPreciseSleepTimes(bed, t);
-            }),
+            _buildTimePickerRow(context, "Woke Up", wake, (t) => vm.setPreciseSleepTimes(bed, t)),
             const SizedBox(height: 40),
-            Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                decoration: BoxDecoration(border: Border.all(color: Colors.cyanAccent), borderRadius: BorderRadius.circular(20)),
-                child: Text(
-                  "Total Sleep: ${vm.input.sleepHours.toStringAsFixed(1)}h",
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.cyanAccent),
-                ),
-              ),
-            ),
+            Center(child: Text("Total Sleep: ${vm.input.sleepHours.toStringAsFixed(1)}h", style: const TextStyle(fontSize: 18, color: Colors.cyanAccent))),
           ] else ...[
             const Center(child: Text("SIMPLE SLIDER MODE", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey))),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                    vm.input.sleepHours.toStringAsFixed(1),
-                    style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold)
-                ),
-                const Text(" h", style: TextStyle(fontSize: 24)),
-              ],
-            ),
-            Slider(
-              value: vm.input.sleepHours,
-              min: 0,
-              max: 14,
-              divisions: 28,
-              activeColor: Colors.cyanAccent,
-              onChanged: (v) => vm.updateInputs(sleep: v),
-            ),
+            Slider(value: vm.input.sleepHours, min: 0, max: 14, divisions: 28, activeColor: Colors.cyanAccent, onChanged: (v) => vm.updateInputs(sleep: v)),
           ],
-
           const SizedBox(height: 40),
-          ElevatedButton(
-            onPressed: vm.commitData,
-            style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.all(16),
-                backgroundColor: Colors.white10,
-                foregroundColor: Colors.white
-            ),
-            child: const Text("SAVE SLEEP LOG"),
-          ),
+          ElevatedButton(onPressed: vm.commitData, child: const Text("SAVE SLEEP LOG")),
         ],
       ),
     );
@@ -252,39 +221,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // --- TAB 1: CHART ---
+  // --- CORREZIONE 1: LEGENDA CHART SEMPRE VISIBILE ---
   Widget _buildChartTab(BuildContext context, SimulationViewModel vm, SimulationResult res) {
-    if (!vm.input.usePreciseTiming) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.show_chart, size: 64, color: Colors.grey),
-            const SizedBox(height: 16),
-            const Text("Chart Unavailable", style: TextStyle(fontSize: 20)),
-            const SizedBox(height: 8),
-            const Text("Switch to 'Precise Scheduling' in the SLEEP tab\nto generate your daily energy curve.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () => DefaultTabController.of(context).animateTo(0),
-              child: const Text("Go to Sleep Tab"),
-            )
-          ],
-        ),
-      );
+    if (!vm.input.usePreciseTiming && !vm.isFutureDate) {
+      return const Center(child: Text("Chart requires Precise Scheduling or Forecast Mode"));
     }
-
-    if (res.energyCurve.isEmpty) return const Center(child: Text("Calculating curve..."));
+    if (res.energyCurve.isEmpty) return const Center(child: Text("No Data"));
 
     return Column(
       children: [
-        // Messaggio Insight
         Padding(
           padding: const EdgeInsets.all(16.0),
           child: Text(res.predictionMessage, style: const TextStyle(fontStyle: FontStyle.italic, color: Colors.grey), textAlign: TextAlign.center),
         ),
 
-        // GRAFICO
+        // Grafico Espanso
         Expanded(
           child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -296,30 +247,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 10)]
             ),
             child: CustomPaint(
-              painter: EnergyChartPainter(
-                  points: res.energyCurve,
-                  now: DateTime.now(),
-                  accentColor: Colors.cyanAccent
-              ),
-              size: Size.infinite,
+                painter: EnergyChartPainter(points: res.energyCurve, now: DateTime.now(), accentColor: Colors.cyanAccent),
+                size: Size.infinite
             ),
           ),
         ),
 
-        // Legenda
-        Padding(
-          padding: const EdgeInsets.only(bottom: 16, top: 8),
+        // LEGENDA FISSA IN BASSO
+        Container(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          color: Theme.of(context).scaffoldBackgroundColor, // Background opaco per leggibilità
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: const [
-              Icon(Icons.circle, size: 8, color: Colors.cyanAccent), SizedBox(width: 4),
-              Text("Past", style: TextStyle(fontSize: 10)),
+              Icon(Icons.circle, size: 10, color: Colors.cyanAccent), SizedBox(width: 4),
+              Text("History", style: TextStyle(fontSize: 12)),
               SizedBox(width: 16),
-              Icon(Icons.circle, size: 8, color: Colors.grey), SizedBox(width: 4),
-              Text("Forecast", style: TextStyle(fontSize: 10)),
+              Icon(Icons.circle, size: 10, color: Colors.grey), SizedBox(width: 4),
+              Text("Future", style: TextStyle(fontSize: 12)),
               SizedBox(width: 16),
-              Icon(Icons.circle, size: 8, color: Colors.blueAccent), SizedBox(width: 4),
-              Text("Drink Time", style: TextStyle(fontSize: 10)),
+              Icon(Icons.circle, size: 10, color: Colors.blueAccent), SizedBox(width: 4),
+              Text("Hydrate", style: TextStyle(fontSize: 12)),
             ],
           ),
         ),
@@ -327,46 +275,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // --- TAB 2: WATER ---
   Widget _buildWaterTab(BuildContext context, SimulationViewModel vm) {
     return Padding(
       padding: const EdgeInsets.all(24.0),
       child: Column(
         children: [
-          const Text("HYDRATION LEVEL", style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
           const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                  vm.input.waterLiters.toStringAsFixed(1),
-                  style: const TextStyle(fontSize: 64, fontWeight: FontWeight.bold, color: Colors.white)
-              ),
-              const Text(" L", style: TextStyle(fontSize: 24, color: Colors.blueAccent)),
-            ],
-          ),
+          Text("${vm.input.waterLiters.toStringAsFixed(1)} L", style: const TextStyle(fontSize: 64, fontWeight: FontWeight.bold, color: Colors.white)),
           const SizedBox(height: 30),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _WaterButton(
-                  label: "+ Glass (200ml)",
-                  icon: Icons.local_drink,
-                  onTap: () {
-                    vm.addWaterGlass();
-                    _showRewardSnackBar(context, "Great job! +200ml added 💧");
-                  }
-              ),
+              _WaterButton(label: "+ Glass", icon: Icons.local_drink, onTap: () { vm.addWaterGlass(); }),
               const SizedBox(width: 20),
-              _WaterButton(
-                  label: "+ Bottle (0.5L)",
-                  icon: Icons.local_cafe,
-                  onTap: () {
-                    vm.updateInputs(water: vm.input.waterLiters + 0.5);
-                    vm.commitData();
-                    _showRewardSnackBar(context, "Hydration boost! +500ml added 🌊");
-                  }
-              ),
+              _WaterButton(label: "+ Bottle", icon: Icons.local_cafe, onTap: () { vm.updateInputs(water: vm.input.waterLiters + 0.5); vm.commitData(); }),
             ],
           ),
           const Spacer(),
@@ -382,43 +304,115 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  void _showRewardSnackBar(BuildContext context, String message) {
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(children: [const Icon(Icons.check_circle, color: Colors.white), const SizedBox(width: 10), Text(message, style: const TextStyle(fontWeight: FontWeight.bold))]),
-        backgroundColor: Colors.green, behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 2),
-      ),
-    );
-  }
-
   Widget _buildDrawer(BuildContext context) {
     return Drawer(
       child: ListView(
         children: [
-          const DrawerHeader(child: Center(child: Text("BODY DEBT", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 24)))),
-          ListTile(
-            leading: const Icon(Icons.settings),
-            title: const Text("Settings & Reset"),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
-            },
-          )
+          const DrawerHeader(child: Center(child: Text("BODY DEBT"))),
+          ListTile(leading: const Icon(Icons.settings), title: const Text("Settings"), onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())); })
         ],
       ),
     );
   }
 
   Future<void> _pickDate(BuildContext context) async {
-    final vm = context.read<SimulationViewModel>();
-    final newDate = await showDatePicker(
-      context: context,
-      initialDate: vm.selectedDate,
-      firstDate: DateTime(2024),
-      lastDate: DateTime.now(),
+    _openForecastCalendar(context);
+  }
+}
+
+// --- CORREZIONE 4: CALENDARIO CON HIGHLIGHT SPECIFICO ---
+class ForecastCalendarScreen extends StatelessWidget {
+  const ForecastCalendarScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final vm = context.watch<SimulationViewModel>();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final selected = DateTime(vm.selectedDate.year, vm.selectedDate.month, vm.selectedDate.day);
+
+    final forecasts = vm.getCalendarForecast(14);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text("ENERGY FORECAST")),
+      body: GridView.builder(
+        padding: const EdgeInsets.all(16),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, childAspectRatio: 0.8, crossAxisSpacing: 10, mainAxisSpacing: 10),
+        itemCount: 21, // 7 passati + 14 futuri
+        itemBuilder: (context, index) {
+          DateTime day = today.subtract(const Duration(days: 7)).add(Duration(days: index));
+          bool isToday = day.isAtSameMomentAs(today);
+          bool isSelected = day.isAtSameMomentAs(selected);
+          bool isFuture = day.isAfter(today);
+
+          int? energy;
+          if (isFuture) energy = forecasts[day];
+          else if (isToday) energy = vm.result.energyPercentage;
+
+          // --- LOGICA COLORI ---
+          // Default: Grigio scuro
+          Color bgColor = Colors.grey.withOpacity(0.1);
+          Border? border;
+
+          // Selezionato: Blu pieno
+          if (isSelected) {
+            bgColor = Theme.of(context).colorScheme.primary.withOpacity(0.4);
+          }
+
+          // Oggi: Bordo Ciano (se selezionato, ha ANCHE il bg blu)
+          if (isToday) {
+            border = Border.all(color: Colors.cyanAccent, width: 2);
+            if (!isSelected) bgColor = Colors.transparent; // Se oggi non è selezionato, solo bordo
+          }
+
+          // Badge previsione
+          Color badgeColor = Colors.grey;
+          if (energy != null) {
+            badgeColor = energy > 70 ? Colors.green : (energy > 30 ? Colors.amber : Colors.red);
+          }
+
+          return InkWell(
+            onTap: () {
+              vm.selectDate(day);
+              Navigator.pop(context);
+            },
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              decoration: BoxDecoration(
+                  color: bgColor,
+                  borderRadius: BorderRadius.circular(12),
+                  border: border
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                      "${day.day}/${day.month}",
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: isToday ? Colors.cyanAccent : Colors.white
+                      )
+                  ),
+                  const SizedBox(height: 8),
+                  if (isFuture && energy != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(color: badgeColor, borderRadius: BorderRadius.circular(8)),
+                      child: Text("$energy%", style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                    )
+                  else if (!isFuture)
+                    Icon(
+                        Icons.history,
+                        size: 16,
+                        color: isSelected ? Colors.white : Colors.grey
+                    )
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
-    if (newDate != null) vm.selectDate(newDate);
   }
 }
 
@@ -433,13 +427,8 @@ class _WaterButton extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Container(
-        width: 130,
-        padding: const EdgeInsets.symmetric(vertical: 24),
-        decoration: BoxDecoration(
-            border: Border.all(color: Colors.blueAccent.withOpacity(0.5)),
-            borderRadius: BorderRadius.circular(16),
-            color: Colors.blueAccent.withOpacity(0.1)
-        ),
+        width: 130, padding: const EdgeInsets.symmetric(vertical: 24),
+        decoration: BoxDecoration(border: Border.all(color: Colors.blueAccent.withOpacity(0.5)), borderRadius: BorderRadius.circular(16), color: Colors.blueAccent.withOpacity(0.1)),
         child: Column(children: [Icon(icon, color: Colors.blueAccent, size: 40), const SizedBox(height: 12), Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))]),
       ),
     );
