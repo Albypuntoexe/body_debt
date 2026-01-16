@@ -1,3 +1,4 @@
+// (Invariato rispetto alla v6.0 tranne per saveUserProfile che ora è più robusto)
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/models.dart';
@@ -56,7 +57,6 @@ class SimulationViewModel extends ChangeNotifier {
         _selectedDate.day == now.day;
   }
 
-  // Helper Date
   bool get isFutureDate {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -87,14 +87,11 @@ class SimulationViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- CALENDAR FORECAST HELPER ---
-  // Ritorna l'energia prevista per i prossimi X giorni
   Map<DateTime, int> getCalendarForecast(int daysAhead) {
     Map<DateTime, int> forecast = {};
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
-    // Inizia da domani
     for (int i = 1; i <= daysAhead; i++) {
       DateTime target = today.add(Duration(days: i));
       int energy = _repository.getProjectedWakeUpEnergy(_userProfile, target);
@@ -113,7 +110,6 @@ class SimulationViewModel extends ChangeNotifier {
     _isWhatIfMode = false;
 
     if (isFutureDate) {
-      // Se futuro, resetta input a default per mostrare la previsione pulita
       _currentInput = const DailyInput(sleepHours: 8.0, waterLiters: 2.0, usePreciseTiming: true);
     } else {
       _currentInput = _repository.loadLogForDate(_selectedDate);
@@ -126,6 +122,7 @@ class SimulationViewModel extends ChangeNotifier {
   Future<void> saveUserProfile(int age, double weight, double height, String gender) async {
     _userProfile = UserProfile(age: age, weightKg: weight, heightCm: height, gender: gender);
     await _repository.saveProfile(_userProfile);
+    _calculate(save: false); // Ricalcola con i nuovi parametri
     notifyListeners();
   }
 
@@ -154,7 +151,7 @@ class SimulationViewModel extends ChangeNotifier {
   }
 
   void updateInputs({double? sleep, double? water, double? activity}) {
-    if (isFutureDate) return; // Non modificare input futuri
+    if (isFutureDate) return;
     _currentInput = _currentInput.copyWith(sleepHours: sleep, waterLiters: water, activityLevel: activity);
     _isWhatIfMode = true;
     _calculate(save: false);
@@ -163,7 +160,7 @@ class SimulationViewModel extends ChangeNotifier {
 
   void _calculate({required bool save}) {
     _result = _repository.runSimulation(_userProfile, _currentInput, _selectedDate, isForecast: _isWhatIfMode);
-    if (save && !isFutureDate) { // Non salvare log futuri su disco
+    if (save && !isFutureDate) {
       _repository.saveLogForDate(_selectedDate, _currentInput);
     }
     notifyListeners();
