@@ -284,7 +284,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
               _WaterButton(
                   label: "+ Glass (200ml)",
                   icon: Icons.local_drink,
-                  onTap: vm.addWaterGlass
+                  onTap: () {
+                    vm.addWaterGlass();
+                    _showRewardSnackBar(context, "Great job! +200ml added 💧");
+                  }
               ),
               const SizedBox(width: 20),
               _WaterButton(
@@ -293,6 +296,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   onTap: () {
                     vm.updateInputs(water: vm.input.waterLiters + 0.5);
                     vm.commitData();
+                    _showRewardSnackBar(context, "Hydration boost! +500ml added 🌊");
                   }
               ),
             ],
@@ -305,6 +309,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onChanged: (v) => vm.updateInputs(water: v),
           ),
         ],
+      ),
+    );
+  }
+
+  // NUOVO METODO PER IL FEEDBACK
+  void _showRewardSnackBar(BuildContext context, String message) {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar(); // Rimuove eventuali vecchie snackbar
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.white),
+            const SizedBox(width: 10),
+            Text(message, style: const TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+        backgroundColor: Colors.green, // Colore positivo
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
