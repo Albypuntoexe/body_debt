@@ -1,4 +1,4 @@
-import 'dart:math'; // Necessario per il calcolo degli angoli del tachimetro
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../view_models/simulation_view_model.dart';
@@ -15,7 +15,6 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-
   @override
   void initState() {
     super.initState();
@@ -28,7 +27,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final vm = context.read<SimulationViewModel>();
     final hour = DateTime.now().hour;
     if (vm.isSelectedDateToday && hour >= 5 && vm.shouldShowMorningPrompt) {
-      // Prompt opzionale
+      // Logic for prompt
     }
   }
 
@@ -40,24 +39,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final isFuture = context.select<SimulationViewModel, bool>((vm) => vm.isFutureDate);
     final isPast = context.select<SimulationViewModel, bool>((vm) => vm.isPastDate);
 
+    // DEFINIZIONE COLORI CUSTOM
+    final bgDark = const Color(0xFF121212);
+    final cardDark = const Color(0xFF1E1E1E);
+    final primaryAccent = Colors.cyanAccent;
+
     return DefaultTabController(
       length: 3,
       initialIndex: 1,
       child: Scaffold(
+        backgroundColor: bgDark,
         appBar: AppBar(
+          backgroundColor: bgDark,
+          elevation: 0,
           title: Consumer<SimulationViewModel>(
             builder: (context, vm, _) {
               final date = vm.selectedDate;
               final now = DateTime.now();
-              if (vm.isFutureDate) return Text("FORECAST: ${date.day}/${date.month}");
+              if (vm.isFutureDate) return _buildDateTitle("FORECAST", date);
               final isToday = date.year == now.year && date.month == now.month && date.day == now.day;
-              return Text(isToday ? "BODYDEBT" : "HISTORY: ${date.day}/${date.month}");
+              return isToday
+                  ? const Text("BODYDEBT", style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 3, color: Colors.white))
+                  : _buildDateTitle("HISTORY", date);
             },
           ),
           centerTitle: true,
           actions: [
             IconButton(
-              icon: const Icon(Icons.calendar_month, color: Colors.cyanAccent),
+              icon: const Icon(Icons.calendar_month_outlined),
+              color: primaryAccent,
               onPressed: () => _openForecastCalendar(context),
             ),
           ],
@@ -69,42 +79,51 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
             return Column(
               children: [
-                _buildTopStats(context, res, vm),
+                const SizedBox(height: 10),
+                // 1. TOP STATS CARDS
+                _buildTopStatsModern(context, res, vm),
 
+                const SizedBox(height: 20),
+
+                // 2. TAB BAR STILIZZATA
                 Container(
-                  color: Theme.of(context).cardColor,
+                  margin: const EdgeInsets.symmetric(horizontal: 24),
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: cardDark,
+                    borderRadius: BorderRadius.circular(25),
+                  ),
                   child: TabBar(
-                    indicatorColor: Colors.cyanAccent,
-                    labelColor: Colors.cyanAccent,
+                    indicator: BoxDecoration(
+                        color: primaryAccent.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: primaryAccent.withOpacity(0.5))
+                    ),
+                    labelColor: primaryAccent,
                     unselectedLabelColor: Colors.grey,
+                    indicatorSize: TabBarIndicatorSize.tab,
+                    dividerColor: Colors.transparent,
                     onTap: (index) {
                       if (isPast && index == 1) {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Chart not available for past logs"), duration: Duration(seconds: 1)));
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Chart unavailable for past logs"), backgroundColor: Colors.redAccent));
                       }
                     },
                     tabs: [
-                      const Tab(icon: Icon(Icons.bed), text: "SLEEP"),
-                      Tab(icon: Icon(isPast ? Icons.visibility_off : Icons.show_chart), text: "CHART"),
-                      const Tab(icon: Icon(Icons.water_drop), text: "WATER"),
+                      const Tab(text: "SLEEP"), // Rimosse icone per stile più pulito
+                      Tab(text: isPast ? "LOCKED" : "ENERGY"),
+                      const Tab(text: "WATER"),
                     ],
                   ),
                 ),
 
+                // 3. CONTENUTO TAB
                 Expanded(
                   child: TabBarView(
                     physics: isFuture ? const NeverScrollableScrollPhysics() : null,
                     children: [
-                      isFuture
-                          ? _buildLockedTab("Sleep inputs are locked in forecast mode.")
-                          : _buildSleepInputTab(context, vm),
-
-                      isPast
-                          ? _buildLockedTab("Energy Chart is not available for past days.")
-                          : _buildChartTab(context, vm, res),
-
-                      isFuture
-                          ? _buildLockedTab("Water logging locked in forecast mode.")
-                          : _buildWaterTab(context, vm),
+                      isFuture ? _buildLockedTab("Inputs locked in forecast mode") : _buildSleepInputTab(context, vm),
+                      isPast ? _buildLockedTab("Chart unavailable for history") : _buildChartTab(context, vm, res),
+                      isFuture ? _buildLockedTab("Water logging locked") : _buildWaterTab(context, vm),
                     ],
                   ),
                 ),
@@ -116,55 +135,84 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  void _openForecastCalendar(BuildContext context) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const ForecastCalendarScreen()));
-  }
-
-  Widget _buildLockedTab(String msg) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.lock_outline, size: 48, color: Colors.grey),
-          const SizedBox(height: 16),
-          Text(msg, style: const TextStyle(color: Colors.grey)),
-        ],
-      ),
+  Widget _buildDateTitle(String prefix, DateTime date) {
+    return Column(
+      children: [
+        Text(prefix, style: const TextStyle(fontSize: 10, letterSpacing: 2, color: Colors.grey)),
+        Text("${date.day}/${date.month}", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+      ],
     );
   }
 
-  Widget _buildTopStats(BuildContext context, SimulationResult res, SimulationViewModel vm) {
-    Color energyColor = res.energyPercentage > 70 ? Colors.cyanAccent : (res.energyPercentage > 30 ? Colors.amber : Colors.redAccent);
+  // --- NEW UI: MODERN TOP STATS ---
+  Widget _buildTopStatsModern(BuildContext context, SimulationResult res, SimulationViewModel vm) {
+    Color energyColor = res.energyPercentage > 70 ? Colors.cyanAccent : (res.energyPercentage > 30 ? Colors.amberAccent : Colors.redAccent);
     bool isFuture = vm.isFutureDate;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor.withOpacity(0.5),
-        border: Border(bottom: BorderSide(color: Colors.white10)),
-      ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          Column(
-            children: [
-              Text(isFuture ? "PREDICTED WAKE" : "CURRENT ENERGY", style: const TextStyle(fontSize: 10, letterSpacing: 1.2)),
-              const SizedBox(height: 4),
-              Text("${res.energyPercentage}%", style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: energyColor)),
-            ],
+          // CARD 1: ENERGY
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                      colors: [const Color(0xFF1E1E1E), const Color(0xFF252525)],
+                      begin: Alignment.topLeft, end: Alignment.bottomRight
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 10, offset: Offset(0, 5))]
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.bolt, color: energyColor, size: 16),
+                      const SizedBox(width: 5),
+                      Text(isFuture ? "PREDICTION" : "ENERGY", style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text("${res.energyPercentage}%", style: TextStyle(fontSize: 36, fontWeight: FontWeight.w900, color: energyColor)),
+                ],
+              ),
+            ),
           ),
-          Column(
-            children: [
-              const Text("SLEEP DEBT", style: TextStyle(fontSize: 10, letterSpacing: 1.2)),
-              const SizedBox(height: 4),
-              Text("${res.sleepDebtHours.toStringAsFixed(1)}h", style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.redAccent)),
-            ],
+          const SizedBox(width: 16),
+          // CARD 2: DEBT
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E1E),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white.withOpacity(0.05))
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.access_time, color: Colors.redAccent, size: 16),
+                      SizedBox(width: 5),
+                      Text("SLEEP DEBT", style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text("${res.sleepDebtHours.toStringAsFixed(1)}h", style: const TextStyle(fontSize: 36, fontWeight: FontWeight.w900, color: Colors.white)),
+                ],
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
+  // --- SLEEP TAB ---
   Widget _buildSleepInputTab(BuildContext context, SimulationViewModel vm) {
     TimeOfDay wake = const TimeOfDay(hour: 8, minute: 0);
     TimeOfDay bed = const TimeOfDay(hour: 23, minute: 0);
@@ -178,72 +226,104 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SwitchListTile(
-            title: const Text("Precise Scheduling", style: TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: const Text("Enable to view Energy Chart"),
-            value: vm.input.usePreciseTiming,
-            activeColor: Colors.cyanAccent,
-            onChanged: (val) => vm.togglePreciseMode(val),
+          Container(
+            decoration: BoxDecoration(color: const Color(0xFF1E1E1E), borderRadius: BorderRadius.circular(16)),
+            child: SwitchListTile(
+              title: const Text("Precise Scheduling", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+              subtitle: const Text("Enable to generate chart", style: TextStyle(color: Colors.grey, fontSize: 12)),
+              value: vm.input.usePreciseTiming,
+              activeColor: Colors.cyanAccent,
+              onChanged: (val) => vm.togglePreciseMode(val),
+            ),
           ),
-          const Divider(),
           const SizedBox(height: 20),
+
           if (vm.input.usePreciseTiming) ...[
-            _buildTimePickerRow(context, "Went to Bed", bed, (t) => vm.setPreciseSleepTimes(t, wake)),
-            const SizedBox(height: 20),
-            _buildTimePickerRow(context, "Woke Up", wake, (t) => vm.setPreciseSleepTimes(bed, t)),
-            const SizedBox(height: 40),
-            Center(child: Text("Total Sleep: ${vm.input.sleepHours.toStringAsFixed(1)}h", style: const TextStyle(fontSize: 18, color: Colors.cyanAccent))),
+            Row(
+              children: [
+                Expanded(child: _buildTimeCard(context, "BEDTIME", bed, (t) => vm.setPreciseSleepTimes(t, wake), Icons.bedtime)),
+                const SizedBox(width: 16),
+                Expanded(child: _buildTimeCard(context, "WAKE UP", wake, (t) => vm.setPreciseSleepTimes(bed, t), Icons.wb_sunny)),
+              ],
+            ),
+            const SizedBox(height: 30),
+            Text("TOTAL SLEEP", style: TextStyle(color: Colors.cyanAccent.withOpacity(0.7), letterSpacing: 2, fontSize: 12)),
+            Text("${vm.input.sleepHours.toStringAsFixed(1)}h", style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Colors.white)),
           ] else ...[
-            const Center(child: Text("SIMPLE SLIDER MODE", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey))),
+            const Text("MANUAL INPUT", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+            const SizedBox(height: 20),
+            Text("${vm.input.sleepHours.toStringAsFixed(1)} h", style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Colors.white)),
             Slider(value: vm.input.sleepHours, min: 0, max: 14, divisions: 28, activeColor: Colors.cyanAccent, onChanged: (v) => vm.updateInputs(sleep: v)),
           ],
+
           const SizedBox(height: 40),
-          ElevatedButton(onPressed: vm.commitData, child: const Text("SAVE SLEEP LOG")),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+                onPressed: vm.commitData,
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.cyanAccent.withOpacity(0.1),
+                    foregroundColor: Colors.cyanAccent,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.cyanAccent))
+                ),
+                child: const Text("SAVE SLEEP LOG", style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1))
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildTimePickerRow(BuildContext context, String label, TimeOfDay time, Function(TimeOfDay) onSelect) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Expanded(child: Text(label, style: const TextStyle(fontSize: 16))),
-        OutlinedButton(
-          onPressed: () async {
-            final t = await showTimePicker(context: context, initialTime: time);
-            if (t != null) onSelect(t);
-          },
-          style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.cyanAccent)),
-          child: Text(time.format(context), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.cyanAccent)),
+  Widget _buildTimeCard(BuildContext context, String label, TimeOfDay time, Function(TimeOfDay) onSelect, IconData icon) {
+    return GestureDetector(
+      onTap: () async {
+        final t = await showTimePicker(context: context, initialTime: time);
+        if (t != null) onSelect(t);
+      },
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+            color: const Color(0xFF1E1E1E),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white10)
         ),
-      ],
+        child: Column(
+          children: [
+            Icon(icon, color: Colors.grey, size: 20),
+            const SizedBox(height: 10),
+            Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
+            const SizedBox(height: 5),
+            Text(time.format(context), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
+          ],
+        ),
+      ),
     );
   }
 
+  // --- CHART TAB ---
   Widget _buildChartTab(BuildContext context, SimulationViewModel vm, SimulationResult res) {
     if (!vm.input.usePreciseTiming && !vm.isFutureDate) {
-      return const Center(child: Text("Chart requires Precise Scheduling or Forecast Mode"));
+      return _buildLockedTab("Precise Scheduling Required");
     }
-    if (res.energyCurve.isEmpty) return const Center(child: Text("No Data"));
+    if (res.energyCurve.isEmpty) return const Center(child: Text("Calculating...", style: TextStyle(color: Colors.grey)));
 
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Text(res.predictionMessage, style: const TextStyle(fontStyle: FontStyle.italic, color: Colors.grey), textAlign: TextAlign.center),
+          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16),
+          child: Text(res.predictionMessage, style: const TextStyle(fontStyle: FontStyle.italic, color: Colors.white70), textAlign: TextAlign.center),
         ),
         Expanded(
           child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            padding: const EdgeInsets.all(8),
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            padding: const EdgeInsets.only(top: 20, right: 20, bottom: 20),
             decoration: BoxDecoration(
-                color: const Color(0xFF1E1E1E),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white10),
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 10)]
+                color: const Color(0xFF1A1A1A),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white.withOpacity(0.05)),
+                boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 20)]
             ),
             child: CustomPaint(
                 painter: EnergyChartPainter(points: res.energyCurve, now: DateTime.now(), accentColor: Colors.cyanAccent),
@@ -251,140 +331,198 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ),
         ),
-        Container(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          color: Theme.of(context).scaffoldBackgroundColor,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: const [
-              Icon(Icons.circle, size: 10, color: Colors.cyanAccent), SizedBox(width: 4), Text("History", style: TextStyle(fontSize: 12)),
-              SizedBox(width: 16),
-              Icon(Icons.circle, size: 10, color: Colors.grey), SizedBox(width: 4), Text("Future", style: TextStyle(fontSize: 12)),
-              SizedBox(width: 16),
-              Icon(Icons.circle, size: 10, color: Colors.blueAccent), SizedBox(width: 4), Text("Hydrate", style: TextStyle(fontSize: 12)),
-            ],
-          ),
-        ),
       ],
     );
   }
 
+  // --- WATER TAB ---
   Widget _buildWaterTab(BuildContext context, SimulationViewModel vm) {
     double percentage = vm.result.hydrationStatus;
+    Color progressColor = vm.result.needsWaterNow ? Colors.orangeAccent : Colors.cyanAccent;
 
     return Padding(
       padding: const EdgeInsets.all(24.0),
       child: Column(
         children: [
-          const Text("HYDRATION LEVEL", style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 10),
-
+          // BIG CIRCULAR INDICATOR
           Stack(
             alignment: Alignment.center,
             children: [
               SizedBox(
-                width: 150, height: 150,
+                width: 180, height: 180,
                 child: CircularProgressIndicator(
                   value: percentage / 100,
-                  strokeWidth: 10,
-                  backgroundColor: Colors.blueAccent.withOpacity(0.1),
-                  color: Colors.blueAccent,
+                  strokeWidth: 15,
+                  backgroundColor: const Color(0xFF222222),
+                  color: progressColor,
+                  strokeCap: StrokeCap.round,
                 ),
               ),
               Column(
                 children: [
-                  Text("${percentage.toInt()}%", style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: Colors.white)),
-                  Text("of daily need", style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),
+                  Text("${percentage.toInt()}%", style: const TextStyle(fontSize: 42, fontWeight: FontWeight.w900, color: Colors.white)),
+                  Text("HYDRATION", style: TextStyle(fontSize: 10, color: Colors.white.withOpacity(0.5), letterSpacing: 2)),
                 ],
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          Text(
-            vm.result.needsWaterNow ? "You are behind schedule!" : "Great job, keep it up! 💧",
-            style: TextStyle(color: vm.result.needsWaterNow ? Colors.orange : Colors.greenAccent, fontWeight: FontWeight.bold),
+
+          const SizedBox(height: 20),
+
+          // MESSAGE
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(color: progressColor.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
+            child: Text(
+              vm.result.needsWaterNow ? "⚠️ Drink water now!" : "Hydration Optimal 💧",
+              style: TextStyle(color: progressColor, fontWeight: FontWeight.bold),
+            ),
           ),
-          const SizedBox(height: 20),
-          Text("${vm.input.waterLiters.toStringAsFixed(1)} L", style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.blueAccent)),
-          const SizedBox(height: 20),
+
+          const Spacer(),
+
+          // BUTTONS
           Row(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _WaterButton(label: "+ Glass", icon: Icons.local_drink, onTap: () {
+              Expanded(child: _WaterButton(label: "+ Glass", sub: "200ml", icon: Icons.local_drink, color: Colors.blueAccent, onTap: () {
                 vm.addWaterGlass();
                 _showRewardSnackBar(context, "Hydration Boost! +200ml 💧");
-              }),
-              const SizedBox(width: 20),
-              _WaterButton(label: "+ Bottle", icon: Icons.local_cafe, onTap: () {
+              })),
+              const SizedBox(width: 16),
+              Expanded(child: _WaterButton(label: "+ Bottle", sub: "500ml", icon: Icons.local_cafe, color: Colors.purpleAccent, onTap: () {
                 vm.updateInputs(water: vm.input.waterLiters + 0.5);
                 vm.commitData();
                 _showRewardSnackBar(context, "Big Sip! +500ml 🌊");
-              }),
+              })),
             ],
           ),
-          const Spacer(),
-          const Text("MANUAL ADJUST", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
-          const SizedBox(height: 8),
-          Slider(
-            value: vm.input.waterLiters,
-            max: 5.0,
-            activeColor: Colors.blueAccent,
-            onChanged: (v) => vm.updateInputs(water: v),
+
+          const SizedBox(height: 30),
+
+          // MANUAL ADJUST
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("MANUAL ADJUST", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+              Text("${vm.input.waterLiters.toStringAsFixed(1)} L", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+            ],
+          ),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              activeTrackColor: Colors.white,
+              inactiveTrackColor: Colors.white24,
+              thumbColor: Colors.white,
+              overlayColor: Colors.white12,
+            ),
+            child: Slider(
+              value: vm.input.waterLiters,
+              max: 5.0,
+              onChanged: (v) => vm.updateInputs(water: v),
+            ),
           ),
         ],
       ),
     );
+  }
+
+  void _openForecastCalendar(BuildContext context) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const ForecastCalendarScreen()));
   }
 
   void _showRewardSnackBar(BuildContext context, String message) {
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Row(children: [const Icon(Icons.check_circle, color: Colors.white), const SizedBox(width: 10), Text(message, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
+        content: Row(children: [const Icon(Icons.check_circle, color: Colors.white), const SizedBox(width: 10), Text(message, style: const TextStyle(fontWeight: FontWeight.bold))]),
         backgroundColor: Colors.green, behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 2),
       ),
     );
   }
 
-  Widget _buildDrawer(BuildContext context) {
-    return Drawer(
-      child: ListView(
-        padding: EdgeInsets.zero,
+  Widget _buildLockedTab(String msg) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          DrawerHeader(
-            decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface),
-            child: const Center(child: Text("BODY DEBT", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 24, letterSpacing: 2))),
-          ),
-          ListTile(
-              leading: const Icon(Icons.settings),
-              title: const Text("Settings"),
-              onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())); }
-          ),
-          const Divider(),
-          ListTile(
-              leading: const Icon(Icons.monitor_weight),
-              title: const Text("BMI Calculator"),
-              subtitle: const Text("Check your stats"),
-              onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => const BMICalculatorScreen())); }
-          ),
-          ListTile(
-              leading: const Icon(Icons.lightbulb),
-              title: const Text("Sleep Guide"),
-              subtitle: const Text("Tips for better rest"),
-              onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => const SleepGuideScreen())); }
-          ),
+          Icon(Icons.lock_outline, size: 60, color: Colors.white.withOpacity(0.1)),
+          const SizedBox(height: 16),
+          Text(msg, style: TextStyle(color: Colors.white.withOpacity(0.3))),
         ],
       ),
     );
   }
 
-  Future<void> _pickDate(BuildContext context) async {
-    _openForecastCalendar(context);
+  Widget _buildDrawer(BuildContext context) {
+    // Menu Drawer Styling
+    final drawerStyle = TextStyle(fontWeight: FontWeight.w600, color: Colors.white);
+    return Drawer(
+      backgroundColor: const Color(0xFF121212),
+      child: ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          DrawerHeader(
+            decoration: const BoxDecoration(
+                gradient: LinearGradient(colors: [Colors.blueAccent, Colors.purpleAccent], begin: Alignment.topLeft, end: Alignment.bottomRight)
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: const [
+                Icon(Icons.health_and_safety, size: 50, color: Colors.white),
+                SizedBox(height: 10),
+                Text("BODY DEBT", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 24, letterSpacing: 3, color: Colors.white)),
+              ],
+            ),
+          ),
+          ListTile(leading: const Icon(Icons.settings, color: Colors.grey), title: Text("Settings", style: drawerStyle), onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())); }),
+          const Divider(color: Colors.white10),
+          ListTile(leading: const Icon(Icons.monitor_weight, color: Colors.cyanAccent), title: Text("BMI Calculator", style: drawerStyle), onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => const BMICalculatorScreen())); }),
+          ListTile(leading: const Icon(Icons.lightbulb, color: Colors.amberAccent), title: Text("Sleep Guide", style: drawerStyle), onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => const SleepGuideScreen())); }),
+        ],
+      ),
+    );
   }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// CALENDARIO CON PERCENTUALI (Aggiornato)
+// MODERN WATER BUTTON
+// ════════════════════════════════════════════════════════════════════════════
+class _WaterButton extends StatelessWidget {
+  final String label;
+  final String sub;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _WaterButton({required this.label, required this.sub, required this.icon, required this.color, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        height: 120,
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 32),
+            const SizedBox(height: 8),
+            Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
+            Text(sub, style: TextStyle(fontSize: 10, color: Colors.white.withOpacity(0.5))),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// CALENDARIO REALE (Styling Aggiornato)
 // ════════════════════════════════════════════════════════════════════════════
 class ForecastCalendarScreen extends StatelessWidget {
   const ForecastCalendarScreen({super.key});
@@ -393,47 +531,40 @@ class ForecastCalendarScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final vm = context.watch<SimulationViewModel>();
     final now = DateTime.now();
-
     final firstDayOfMonth = DateTime(now.year, now.month, 1);
     final daysInMonth = DateUtils.getDaysInMonth(now.year, now.month);
-
     int firstWeekday = firstDayOfMonth.weekday;
     int emptySlots = firstWeekday - 1;
-
     final forecasts = vm.getCalendarForecast(14);
 
     return Scaffold(
-      appBar: AppBar(title: const Text("CALENDAR")),
+      backgroundColor: const Color(0xFF121212),
+      appBar: AppBar(backgroundColor: const Color(0xFF121212), title: const Text("CALENDAR", style: TextStyle(letterSpacing: 2, fontSize: 16)), centerTitle: true),
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16.0),
+            padding: const EdgeInsets.symmetric(vertical: 20.0),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
-                  .map((d) => Text(d, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)))
+                  .map((d) => Text(d, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey, fontSize: 12)))
                   .toList(),
             ),
           ),
           Expanded(
             child: GridView.builder(
-              padding: const EdgeInsets.all(8),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 7, childAspectRatio: 0.7, crossAxisSpacing: 4, mainAxisSpacing: 4),
+              padding: const EdgeInsets.all(12),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 7, childAspectRatio: 0.75, crossAxisSpacing: 6, mainAxisSpacing: 6),
               itemCount: daysInMonth + emptySlots,
               itemBuilder: (context, index) {
                 if (index < emptySlots) return Container();
-
                 final dayNum = index - emptySlots + 1;
                 final date = DateTime(now.year, now.month, dayNum);
-
                 bool isToday = date.day == now.day;
                 bool isSelected = vm.selectedDate.day == date.day && vm.selectedDate.month == date.month;
 
                 int? energy;
-                bool isForecastable = !date.isBefore(DateTime(now.year, now.month, now.day)) &&
-                    date.difference(now).inDays < 14;
-
-                if (date.isAfter(now) && isForecastable) {
+                if (date.isAfter(now) && !date.isBefore(DateTime(now.year, now.month, now.day)) && date.difference(now).inDays < 14) {
                   energy = forecasts[date];
                 } else if (isToday) {
                   energy = vm.result.energyPercentage;
@@ -447,11 +578,12 @@ class ForecastCalendarScreen extends StatelessWidget {
                     vm.selectDate(date);
                     Navigator.pop(context);
                   },
+                  borderRadius: BorderRadius.circular(10),
                   child: Container(
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(10),
                       border: isToday ? Border.all(color: Colors.cyanAccent, width: 2) : null,
-                      color: isSelected ? Colors.blueAccent.withOpacity(0.5) : Colors.grey.withOpacity(0.1),
+                      color: isSelected ? Colors.blueAccent : const Color(0xFF1E1E1E),
                     ),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -464,8 +596,6 @@ class ForecastCalendarScreen extends StatelessWidget {
                             decoration: BoxDecoration(color: badgeColor, borderRadius: BorderRadius.circular(4)),
                             child: Text("$energy%", style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 10)),
                           )
-                        else
-                          const Icon(Icons.circle, size: 6, color: Colors.grey)
                       ],
                     ),
                   ),
@@ -480,7 +610,7 @@ class ForecastCalendarScreen extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// BMI TACHIMETRO (Nuovo)
+// BMI TACHIMETRO (Visual Polish)
 // ════════════════════════════════════════════════════════════════════════════
 class BMICalculatorScreen extends StatelessWidget {
   const BMICalculatorScreen({super.key});
@@ -498,51 +628,62 @@ class BMICalculatorScreen extends StatelessWidget {
     else if (bmi >= 30) { status = "Obese"; color = Colors.redAccent; }
 
     return Scaffold(
-      appBar: AppBar(title: const Text("BMI CALCULATOR")),
+      backgroundColor: const Color(0xFF121212),
+      appBar: AppBar(backgroundColor: const Color(0xFF121212), title: const Text("BMI STATUS")),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // GAUGE CUSTOM
             SizedBox(
-              width: 300,
-              height: 160,
+              width: 300, height: 160,
               child: CustomPaint(
                 painter: BMIGaugePainter(bmi: bmi),
                 child: Center(
                   child: Padding(
-                    padding: const EdgeInsets.only(top: 60),
+                    padding: const EdgeInsets.only(top: 50),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(bmi.toStringAsFixed(1), style: TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: color)),
-                        Text(status, style: TextStyle(fontSize: 18, color: color, fontWeight: FontWeight.bold)),
+                        Text(bmi.toStringAsFixed(1), style: TextStyle(fontSize: 56, fontWeight: FontWeight.w900, color: color)),
+                        Text(status, style: TextStyle(fontSize: 20, color: color.withOpacity(0.8), letterSpacing: 1.5)),
                       ],
                     ),
                   ),
                 ),
               ),
             ),
-
-            const SizedBox(height: 30),
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Text(
-                "Height: ${profile.heightCm}cm | Weight: ${profile.weightKg}kg",
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.grey),
+            const SizedBox(height: 50),
+            Container(
+              padding: const EdgeInsets.all(20),
+              margin: const EdgeInsets.symmetric(horizontal: 30),
+              decoration: BoxDecoration(color: const Color(0xFF1E1E1E), borderRadius: BorderRadius.circular(20)),
+              child: Column(
+                children: [
+                  _statRow("Height", "${profile.heightCm} cm"),
+                  const Divider(color: Colors.white10, height: 30),
+                  _statRow("Weight", "${profile.weightKg} kg"),
+                ],
               ),
             ),
-            TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
-                },
-                child: const Text("Update Profile in Settings")
+            const SizedBox(height: 30),
+            TextButton.icon(
+                icon: const Icon(Icons.edit, color: Colors.grey),
+                onPressed: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())); },
+                label: const Text("Edit Profile in Settings", style: TextStyle(color: Colors.grey))
             )
           ],
         ),
       ),
+    );
+  }
+
+  Widget _statRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 16)),
+        Text(value, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+      ],
     );
   }
 }
@@ -555,74 +696,56 @@ class BMIGaugePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height);
     final radius = size.width / 2;
-    final strokeWidth = 20.0;
+    final strokeWidth = 25.0;
     final rect = Rect.fromCircle(center: center, radius: radius);
 
     final paint = Paint()
       ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.butt
       ..strokeWidth = strokeWidth;
 
-    // Disegna archi colorati
-    // Scala BMI sul tachimetro: da 15 (min) a 40 (max)
-    // Angoli: da 180 gradi (PI) a 360 gradi (2*PI)
-
-    // Underweight (<18.5) -> Blue
-    paint.color = Colors.blueAccent;
-    canvas.drawArc(rect, pi, 0.45, false, paint); // approx segment
-
-    // Normal (18.5 - 25) -> Green
-    paint.color = Colors.green;
+    // Arcs
+    paint.color = Colors.blueAccent.withOpacity(0.8);
+    canvas.drawArc(rect, pi, 0.45, false, paint);
+    paint.color = Colors.greenAccent.withOpacity(0.8);
     canvas.drawArc(rect, pi + 0.45, 0.9, false, paint);
-
-    // Overweight (25 - 30) -> Orange
-    paint.color = Colors.orange;
+    paint.color = Colors.orangeAccent.withOpacity(0.8);
     canvas.drawArc(rect, pi + 1.35, 0.6, false, paint);
+    paint.color = Colors.redAccent.withOpacity(0.8);
+    canvas.drawArc(rect, pi + 1.95, 1.2, false, paint);
 
-    // Obese (>30) -> Red
-    paint.color = Colors.red;
-    canvas.drawArc(rect, pi + 1.95, 1.2, false, paint); // fino alla fine
+    // Needle
+    double clampedBMI = bmi.clamp(15.0, 40.0);
+    double normalized = (clampedBMI - 15) / (40 - 15);
+    double angle = pi + (normalized * pi);
 
-    // Lancetta
-    double minBMI = 15;
-    double maxBMI = 40;
-    double clampedBMI = bmi.clamp(minBMI, maxBMI);
-    double normalized = (clampedBMI - minBMI) / (maxBMI - minBMI); // 0.0 a 1.0
-    double angle = pi + (normalized * pi); // Da 180 a 360
+    final needleLength = radius - 5;
+    final needleEnd = Offset(center.dx + needleLength * cos(angle), center.dy + needleLength * sin(angle));
 
-    final needlePaint = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 4
-      ..strokeCap = StrokeCap.round;
-
-    final needleLength = radius - 10;
-    final needleEnd = Offset(
-      center.dx + needleLength * cos(angle),
-      center.dy + needleLength * sin(angle),
-    );
-
-    canvas.drawLine(center, needleEnd, needlePaint);
-    canvas.drawCircle(center, 8, needlePaint..style = PaintingStyle.fill);
+    canvas.drawLine(center, needleEnd, Paint()..color = Colors.white..strokeWidth = 6..strokeCap = StrokeCap.round);
+    canvas.drawCircle(center, 10, Paint()..color = Colors.white);
   }
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
 
-// --- Sleep Guide Screen (Invariato) ---
+// --- SLEEP GUIDE (Minimal Polish) ---
 class SleepGuideScreen extends StatelessWidget {
   const SleepGuideScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("SLEEP GUIDE")),
+      backgroundColor: const Color(0xFF121212),
+      appBar: AppBar(backgroundColor: const Color(0xFF121212), title: const Text("SLEEP GUIDE")),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: const [
-          _TipTile(title: "The 90-Minute Rule", desc: "Sleep cycles last about 90 minutes. Try to wake up at the end of a cycle to feel refreshed."),
-          _TipTile(title: "Consistency is Key", desc: "Going to bed at the same time every day trains your circadian rhythm."),
-          _TipTile(title: "Hydration Impact", desc: "Dehydration reduces melatonin production. Drink water throughout the day, but stop 1h before bed."),
-          _TipTile(title: "Digital Sunset", desc: "Blue light from screens tricks your brain into thinking it's daytime. Avoid screens 1h before sleep."),
+          _TipTile(title: "The 90-Minute Rule", desc: "Sleep cycles last about 90 minutes. Try to wake up at the end of a cycle."),
+          _TipTile(title: "Consistency", desc: "Go to bed and wake up at the same time every day."),
+          _TipTile(title: "Caffeine Curfew", desc: "Avoid caffeine 6-8 hours before bed."),
+          _TipTile(title: "Darkness", desc: "Make your room pitch black or use an eye mask."),
         ],
       ),
     );
@@ -635,31 +758,13 @@ class _TipTile extends StatelessWidget {
   const _TipTile({required this.title, required this.desc});
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return Container(
       margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(color: const Color(0xFF1E1E1E), borderRadius: BorderRadius.circular(12)),
       child: ListTile(
-        leading: const Icon(Icons.check_circle_outline, color: Colors.cyanAccent),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(desc),
-      ),
-    );
-  }
-}
-
-class _WaterButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-  const _WaterButton({required this.label, required this.icon, required this.onTap});
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        width: 130, padding: const EdgeInsets.symmetric(vertical: 24),
-        decoration: BoxDecoration(border: Border.all(color: Colors.blueAccent.withOpacity(0.5)), borderRadius: BorderRadius.circular(16), color: Colors.blueAccent.withOpacity(0.1)),
-        child: Column(children: [Icon(icon, color: Colors.blueAccent, size: 40), const SizedBox(height: 12), Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))]),
+        leading: const Icon(Icons.star, color: Colors.amberAccent),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        subtitle: Text(desc, style: const TextStyle(color: Colors.grey)),
       ),
     );
   }
