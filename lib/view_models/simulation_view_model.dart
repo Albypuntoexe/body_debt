@@ -1,4 +1,3 @@
-// (Invariato rispetto alla v6.0 tranne per saveUserProfile che ora è più robusto)
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/models.dart';
@@ -19,6 +18,7 @@ class SimulationViewModel extends ChangeNotifier {
   bool _morningCheckDone = false;
 
   Timer? _refreshTimer;
+  DateTime _lastSystemCheck = DateTime.now();
 
   SimulationViewModel(this._repository, this._notifications) {
     _init();
@@ -42,6 +42,49 @@ class SimulationViewModel extends ChangeNotifier {
     });
   }
 
+  // ════════════════════════════════════════════════════════════════════════════
+  // FIX: GESTIONE CAMBIO DATA (Time Travel Safe)
+  // ════════════════════════════════════════════════════════════════════════════
+  void refreshDataOnResume() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final lastCheckDay = DateTime(_lastSystemCheck.year, _lastSystemCheck.month, _lastSystemCheck.day);
+
+    // Se la data del sistema è diversa dall'ultima volta che l'app era attiva
+    bool dateChanged = today.isAfter(lastCheckDay) || today.isBefore(lastCheckDay);
+
+    if (dateChanged) {
+      print("📅 System Date Changed detected! Resetting to Today.");
+
+      // 1. Aggiorna la data selezionata a OGGI
+      _selectedDate = today;
+
+      // 2. Resetta il flag del buongiorno (così te lo richiede)
+      _morningCheckDone = false;
+
+      // 3. Carica i dati REALI dal disco per oggi (che saranno vuoti se è un nuovo giorno)
+      //    NON usare logiche di forecast qui.
+      _currentInput = _repository.loadLogForDate(today);
+
+      // 4. Se è un nuovo giorno vuoto, assicurati che sia davvero pulito
+      if (_currentInput.sleepHours == 0 && !_currentInput.usePreciseTiming) {
+        _currentInput = const DailyInput(); // Reset totale
+      }
+
+      _isWhatIfMode = false;
+      _calculate(save: false);
+
+    } else {
+      // Se è lo stesso giorno, ricarica solo per sicurezza (sync background)
+      if (isSelectedDateToday && !_isWhatIfMode) {
+        _currentInput = _repository.loadLogForDate(_selectedDate);
+        _calculate(save: false);
+      }
+    }
+    _lastSystemCheck = now;
+  }
+
+  // ... Getters invariati ...
   SimulationResult get result => _result;
   DailyInput get input => _currentInput;
   UserProfile get userProfile => _userProfile;
@@ -73,15 +116,23 @@ class SimulationViewModel extends ChangeNotifier {
 
   bool get shouldShowMorningPrompt {
     if (!isSelectedDateToday) return false;
-    return !_morningCheckDone && !_result.isDayStarted;
+    // Mostra solo se non abbiamo ancora fatto il check E non ci sono dati di sonno inseriti
+    return !_morningCheckDone && _currentInput.sleepHours == 0;
   }
 
   Future<void> _init() async {
     _userProfile = _repository.loadProfile();
     final now = DateTime.now();
     _selectedDate = DateTime(now.year, now.month, now.day);
+
+    // Caricamento iniziale
     _currentInput = _repository.loadLogForDate(_selectedDate);
-    if (_currentInput.sleepHours > 0) _morningCheckDone = true;
+
+    // Se trovo già dati (es. riapro l'app alle 14:00), non mostrare il prompt
+    if (_currentInput.sleepHours > 0 || _currentInput.usePreciseTiming) {
+      _morningCheckDone = true;
+    }
+
     _calculate(save: false);
     _isLoading = false;
     notifyListeners();
@@ -91,7 +142,6 @@ class SimulationViewModel extends ChangeNotifier {
     Map<DateTime, int> forecast = {};
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-
     for (int i = 1; i <= daysAhead; i++) {
       DateTime target = today.add(Duration(days: i));
       int energy = _repository.getProjectedWakeUpEnergy(_userProfile, target);
@@ -110,8 +160,10 @@ class SimulationViewModel extends ChangeNotifier {
     _isWhatIfMode = false;
 
     if (isFutureDate) {
+      // Forecast Mode: Usa default ottimistici per la visualizzazione
       _currentInput = const DailyInput(sleepHours: 8.0, waterLiters: 2.0, usePreciseTiming: true);
     } else {
+      // History/Today Mode: Carica dati reali
       _currentInput = _repository.loadLogForDate(_selectedDate);
     }
 
@@ -122,7 +174,7 @@ class SimulationViewModel extends ChangeNotifier {
   Future<void> saveUserProfile(int age, double weight, double height, String gender) async {
     _userProfile = UserProfile(age: age, weightKg: weight, heightCm: height, gender: gender);
     await _repository.saveProfile(_userProfile);
-    _calculate(save: false); // Ricalcola con i nuovi parametri
+    _calculate(save: false);
     notifyListeners();
   }
 
@@ -160,6 +212,8 @@ class SimulationViewModel extends ChangeNotifier {
 
   void _calculate({required bool save}) {
     _result = _repository.runSimulation(_userProfile, _currentInput, _selectedDate, isForecast: _isWhatIfMode);
+
+    // FIX: Non salvare mai su disco se stiamo solo guardando il futuro
     if (save && !isFutureDate) {
       _repository.saveLogForDate(_selectedDate, _currentInput);
     }
